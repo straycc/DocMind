@@ -1,0 +1,105 @@
+# 配置示例：复制为 application.yml 后，使用环境变量注入实际连接信息与密钥。
+server:
+  port: ${SERVER_PORT:8081}
+
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: ${JPA_DDL_AUTO:update}
+    show-sql: ${JPA_SHOW_SQL:false}
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: ${MAX_FILE_SIZE:50MB}
+      max-request-size: ${MAX_REQUEST_SIZE:100MB}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      enable-idempotence: true
+      transactional-id-prefix: file-upload-tx-
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP:file-processing-group}
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: ${KAFKA_TRUSTED_PACKAGES:com.yizhaoqi.smartpai.model}
+    topic:
+      file-processing: ${KAFKA_FILE_PROCESSING_TOPIC:file-processing-topic}
+      dlt: ${KAFKA_DLT_TOPIC:file-processing-dlt}
+  elasticsearch:
+    uris: ${ELASTICSEARCH_URIS}
+
+minio:
+  endpoint: ${MINIO_ENDPOINT}
+  accessKey: ${MINIO_ACCESS_KEY}
+  secretKey: ${MINIO_SECRET_KEY}
+  bucketName: ${MINIO_BUCKET_NAME:uploads}
+  publicUrl: ${MINIO_PUBLIC_URL}
+
+jwt:
+  secret-key: ${JWT_SECRET_KEY}
+
+admin:
+  username: ${ADMIN_USERNAME:admin}
+  password: ${ADMIN_PASSWORD}
+  primary-org: ${ADMIN_PRIMARY_ORG:default}
+  org-tags: ${ADMIN_ORG_TAGS:default,admin}
+
+file:
+  parsing:
+    chunk-size: ${FILE_CHUNK_SIZE:512}
+    parent-chunk-size: ${FILE_PARENT_CHUNK_SIZE:1048576}
+    buffer-size: ${FILE_BUFFER_SIZE:8192}
+    max-memory-threshold: ${FILE_MAX_MEMORY_THRESHOLD:0.8}
+
+elasticsearch:
+  host: ${ELASTICSEARCH_HOST}
+  port: ${ELASTICSEARCH_PORT:9200}
+  scheme: ${ELASTICSEARCH_SCHEME:http}
+
+deepseek:
+  api:
+    url: ${DEEPSEEK_API_URL}
+    model: ${DEEPSEEK_API_MODEL:deepseek-chat}
+    key: ${DEEPSEEK_API_KEY}
+
+embedding:
+  api:
+    url: ${EMBEDDING_API_URL}
+    key: ${EMBEDDING_API_KEY}
+    model: ${EMBEDDING_API_MODEL:text-embedding-v4}
+    batch-size: ${EMBEDDING_BATCH_SIZE:10}
+    dimension: ${EMBEDDING_DIMENSION:2048}
+
+ai:
+  prompt:
+    rules: |
+      你是一个知识助手，须遵守：
+      1. 仅用简体中文作答。
+      2. 回答需先给结论，再给论据。
+      3. 如引用参考信息，请在句末加 (来源#编号: 文件名)。
+      4. 若无足够信息，请回答"暂无相关信息"并说明原因。
+    ref-start: "<<REF>>"
+    ref-end: "<<END>>"
+    no-result-text: "（本轮无检索结果）"
+  generation:
+    temperature: ${AI_TEMPERATURE:0.3}
+    max-tokens: ${AI_MAX_TOKENS:2000}
+    top-p: ${AI_TOP_P:0.9}

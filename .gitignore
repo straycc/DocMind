@@ -81,3 +81,7 @@ src/main/resources/application.yml~
 #others
 .qoder
 CLAUDE.md
+
+
+/src/main/resources/application.yml
+/src/main/resources/application-dev.yml
