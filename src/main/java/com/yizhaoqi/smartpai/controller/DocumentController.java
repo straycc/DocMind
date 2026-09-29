@@ -163,6 +163,7 @@ public class DocumentController {
             // 将FileUpload转换为包含tagName的DTO
             List<Map<String, Object>> fileData = files.stream().map(file -> {
                 Map<String, Object> dto = new HashMap<>();
+                dto.put("fileUploadId", file.getId());
                 dto.put("fileMd5", file.getFileMd5());
                 dto.put("fileName", file.getFileName());
                 dto.put("totalSize", file.getTotalSize());
@@ -171,6 +172,9 @@ public class DocumentController {
                 dto.put("public", file.isPublic());
                 dto.put("createdAt", file.getCreatedAt());
                 dto.put("mergedAt", file.getMergedAt());
+                dto.put("uploadProtocol", file.getUploadProtocol());
+                dto.put("partSize", file.getPartSize());
+                dto.put("totalParts", file.getTotalParts());
                 
                 // 将orgTag从tagId转换为tagName
                 String orgTagName = getOrgTagName(file.getOrgTag());
@@ -487,4 +491,4 @@ public class DocumentController {
             return tagId; // 发生错误时返回原tagId
         }
     }
-} 
+}

@@ -135,7 +135,7 @@ watch(visible, () => {
             </NTag>
           </div>
           <template #footer>
-            <span>来源：{{ item.fileName }}</span>
+            <span>来源：{{ item.sourceLabel || item.fileName }}</span>
           </template>
         </NCard>
       </NScrollbar>

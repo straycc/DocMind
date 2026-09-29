@@ -1,184 +1,184 @@
-import { REQUEST_ID_KEY } from '~/packages/axios/src';
-import { nanoid } from '~/packages/utils/src';
+const PART_UPLOAD_CONCURRENCY = 3;
 
 export const useKnowledgeBaseStore = defineStore(SetupStoreId.KnowledgeBase, () => {
   const tasks = ref<Api.KnowledgeBase.UploadTask[]>([]);
   const activeUploads = ref<Set<string>>(new Set());
+  const directUploadControllers = new Map<string, Set<AbortController>>();
 
-  async function uploadChunk(task: Api.KnowledgeBase.UploadTask): Promise<boolean> {
-    const totalChunks = Math.ceil(task.totalSize / chunkSize);
+  async function initializeMultipart(task: Api.KnowledgeBase.UploadTask) {
+    if (task.fileUploadId && task.uploadProtocol === 'S3_MULTIPART') return;
+    if (!task.file) throw new Error('请选择需要上传的本地文件');
 
-    const chunkStart = task.chunkIndex * chunkSize;
-    const chunkEnd = Math.min(chunkStart + chunkSize, task.totalSize);
-    const chunk = task.file.slice(chunkStart, chunkEnd);
-
-    task.chunk = chunk;
-    const requestId = nanoid();
-    task.requestIds ??= [];
-    task.requestIds.push(requestId);
-    const { error, data } = await request<Api.KnowledgeBase.Progress>({
-      url: '/upload/chunk',
+    const { error, data } = await request<Api.KnowledgeBase.MultipartInit>({
+      url: '/upload/multipart/init',
       method: 'POST',
       data: {
-        file: task.chunk,
-        fileMd5: task.fileMd5,
-        chunkIndex: task.chunkIndex,
-        totalSize: task.totalSize,
         fileName: task.fileName,
+        totalSize: task.totalSize,
+        fileMd5: task.fileMd5,
+        contentType: task.file.type || 'application/octet-stream',
         orgTag: task.orgTag,
         isPublic: task.isPublic ?? false
-      },
-      headers: {
-        'Content-Type': 'multipart/form-data',
-        [REQUEST_ID_KEY]: requestId
-      },
+      }
+    });
+    if (error || !data) throw new Error('创建Multipart上传任务失败');
+
+    task.fileUploadId = data.fileUploadId;
+    task.uploadProtocol = 'S3_MULTIPART';
+    task.partSize = data.partSize;
+    task.totalParts = data.totalParts;
+    if (data.status === 'COMPLETED') {
+      task.progress = 100;
+      task.status = UploadStatus.Completed;
+    }
+  }
+
+  async function refreshMultipartStatus(task: Api.KnowledgeBase.UploadTask) {
+    const { error, data } = await request<Api.KnowledgeBase.MultipartStatus>({
+      url: `/upload/multipart/${task.fileUploadId}/status`
+    });
+    if (error || !data) throw new Error('查询Multipart上传状态失败');
+
+    task.partSize = data.partSize;
+    task.totalParts = data.totalParts;
+    task.uploadedChunks = data.uploadedParts.map(part => part.partNumber);
+    task.progress = Number.parseFloat(data.progress.toFixed(2));
+    if (data.status === 'COMPLETED') task.status = UploadStatus.Completed;
+    if (data.status === 'ABORTED') throw new Error('上传任务已取消');
+    return data;
+  }
+
+  async function uploadPart(task: Api.KnowledgeBase.UploadTask, partNumber: number) {
+    if (!task.file || !task.fileUploadId || !task.partSize) throw new Error('上传任务信息不完整');
+    const { error, data } = await request<Api.KnowledgeBase.MultipartPresign>({
+      url: `/upload/multipart/${task.fileUploadId}/parts/${partNumber}/presign`,
+      method: 'POST'
+    });
+    if (error || !data) throw new Error(`获取Part ${partNumber}上传地址失败`);
+
+    const start = (partNumber - 1) * task.partSize;
+    const body = task.file.slice(start, Math.min(start + task.partSize, task.totalSize));
+    const controller = new AbortController();
+    const controllers = directUploadControllers.get(task.fileMd5) ?? new Set<AbortController>();
+    controllers.add(controller);
+    directUploadControllers.set(task.fileMd5, controllers);
+    try {
+      const response = await fetch(data.url, { method: 'PUT', body, signal: controller.signal });
+      if (!response.ok) throw new Error(`Part ${partNumber}上传失败: HTTP ${response.status}`);
+
+      if (!task.uploadedChunks.includes(partNumber)) task.uploadedChunks.push(partNumber);
+      const uploadedBytes = task.uploadedChunks.reduce((total, number) => {
+        const offset = (number - 1) * task.partSize!;
+        return total + Math.min(task.partSize!, task.totalSize - offset);
+      }, 0);
+      task.progress = Number.parseFloat(Math.min(100, (uploadedBytes * 100) / task.totalSize).toFixed(2));
+    } finally {
+      controllers.delete(controller);
+    }
+  }
+
+  async function completeMultipart(task: Api.KnowledgeBase.UploadTask) {
+    const { error } = await request({
+      url: `/upload/multipart/${task.fileUploadId}/complete`,
+      method: 'POST',
       timeout: 10 * 60 * 1000
     });
-
-    task.requestIds = task.requestIds.filter(id => id !== requestId);
-
-    if (error) return false;
-
-    // 更新任务状态
-    const updatedTask = tasks.value.find(t => t.fileMd5 === task.fileMd5)!;
-    updatedTask.uploadedChunks = data.uploaded;
-    updatedTask.progress = Number.parseFloat(data.progress.toFixed(2));
-
-    if (data.uploaded.length === totalChunks) {
-      const success = await mergeFile(task);
-      if (!success) return false;
-    }
-    return true;
+    if (error) throw new Error('完成Multipart上传失败');
+    task.progress = 100;
+    task.status = UploadStatus.Completed;
   }
 
-  async function mergeFile(task: Api.KnowledgeBase.UploadTask) {
-    try {
-      const { error } = await request({
-        url: '/upload/merge',
-        method: 'POST',
-        data: { fileMd5: task.fileMd5, fileName: task.fileName }
-      });
-      if (error) return false;
+  async function uploadFile(task: Api.KnowledgeBase.UploadTask) {
+    await initializeMultipart(task);
+    if (task.status === UploadStatus.Completed) return;
+    const remoteStatus = await refreshMultipartStatus(task);
+    if (remoteStatus.status === 'COMPLETED') return;
 
-      // 更新任务状态为已完成
-      const index = tasks.value.findIndex(t => t.fileMd5 === task.fileMd5);
-      tasks.value[index].status = UploadStatus.Completed;
-      return true;
-    } catch {
-      return false;
-    }
+    const uploaded = new Set(task.uploadedChunks);
+    const missingParts = Array.from({ length: task.totalParts! }, (_, index) => index + 1).filter(
+      partNumber => !uploaded.has(partNumber)
+    );
+    const worker = async () => {
+      while (missingParts.length > 0) {
+        const partNumber = missingParts.shift();
+        if (partNumber !== undefined) await uploadPart(task, partNumber);
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(PART_UPLOAD_CONCURRENCY, missingParts.length) }, () => worker())
+    );
+    await completeMultipart(task);
   }
 
-  /**
-   * 异步函数：将上传请求加入队列
-   *
-   * 本函数处理上传任务的排队和初始化工作它首先检查是否存在相同的文件， 如果不存在，则创建一个新的上传任务，并将其添加到任务队列中最后启动上传流程
-   *
-   * @param form 包含上传信息的表单，包括文件列表和是否公开的标签
-   * @returns 返回一个上传任务对象，无论是已存在的还是新创建的
-   */
   async function enqueueUpload(form: Api.KnowledgeBase.Form) {
-    // 获取文件列表中的第一个文件
     const file = form.fileList![0].file!;
-    // 计算文件的MD5值，用于唯一标识文件
     const md5 = await calculateMD5(file);
-
-    // 检查是否已存在相同文件
-    const existingTask = tasks.value.find(t => t.fileMd5 === md5);
+    const existingTask = tasks.value.find(task => task.fileMd5 === md5);
     if (existingTask) {
-      // 如果存在相同文件，直接返回该上传任务
       if (existingTask.status === UploadStatus.Completed) {
         window.$message?.error('文件已存在');
         return;
-      } else if (existingTask.status === UploadStatus.Pending || existingTask.status === UploadStatus.Uploading) {
+      }
+      if (existingTask.status === UploadStatus.Pending || existingTask.status === UploadStatus.Uploading) {
         window.$message?.error('文件正在上传中');
         return;
-      } else if (existingTask.status === UploadStatus.Break) {
-        existingTask.status = UploadStatus.Pending;
-        startUpload();
-        return;
       }
+      existingTask.file = file;
+      existingTask.status = UploadStatus.Pending;
+      startUpload();
+      return;
     }
 
-    // 创建新的上传任务对象
-    const newTask: Api.KnowledgeBase.UploadTask = {
+    tasks.value.push({
       file,
-      chunk: null,
-      chunkIndex: 0,
       fileMd5: md5,
       fileName: file.name,
+      chunkIndex: 0,
       totalSize: file.size,
       isPublic: form.isPublic,
+      public: form.isPublic,
       uploadedChunks: [],
       progress: 0,
       status: UploadStatus.Pending,
-      orgTag: form.orgTag
-    };
-
-    newTask.orgTagName = form.orgTagName ?? null;
-
-    // 将新的上传任务添加到任务队列中
-    tasks.value.push(newTask);
-    // 启动上传流程
+      orgTag: form.orgTag,
+      orgTagName: form.orgTagName ?? null
+    });
     startUpload();
-    // 返回新的上传任务
   }
 
-  /** 启动文件上传的异步函数 该函数负责从待上传队列中启动文件上传任务，并管理并发上传的数量 */
-  async function startUpload() {
-    // 限制可同时上传的文件个数
+  function startUpload() {
     if (activeUploads.value.size >= 3) return;
-    // 获取待上传的文件
-    const pendingTasks = tasks.value.filter(
-      t => t.status === UploadStatus.Pending && !activeUploads.value.has(t.fileMd5)
+    const task = tasks.value.find(
+      item => item.status === UploadStatus.Pending && !activeUploads.value.has(item.fileMd5)
     );
+    if (!task) return;
 
-    // 如果没有待上传的文件，则直接返回
-    if (pendingTasks.length === 0) return;
-
-    // 获取第一个待上传的文件
-    const task = pendingTasks[0];
     task.status = UploadStatus.Uploading;
     activeUploads.value.add(task.fileMd5);
+    uploadFile(task)
+      .catch(error => {
+        console.error('Multipart upload failed', error);
+        task.status = UploadStatus.Break;
+      })
+      .finally(() => {
+        activeUploads.value.delete(task.fileMd5);
+        directUploadControllers.delete(task.fileMd5);
+        startUpload();
+      });
+    startUpload();
+  }
 
-    // 计算文件总片数
-    const totalChunks = Math.ceil(task.totalSize / chunkSize);
-
-    try {
-      if (task.uploadedChunks.length === totalChunks) {
-        const success = await mergeFile(task);
-        if (!success) throw new Error('文件合并失败');
-      }
-      // const promises = [];
-      // 遍历所有片数
-      for (let i = 0; i < totalChunks; i += 1) {
-        // 如果未上传，则上传
-        if (!task.uploadedChunks.includes(i)) {
-          task.chunkIndex = i;
-          // promises.push(uploadChunk(task))
-          // eslint-disable-next-line no-await-in-loop
-          const success = await uploadChunk(task);
-          if (!success) throw new Error('分片上传失败');
-        }
-      }
-      // await Promise.all(promises)
-    } catch (e) {
-      console.error('%c [ 👉 upload error 👈 ]-168', 'font-size:16px; background:#94cc97; color:#d8ffdb;', e);
-      // 如果上传失败，则将任务状态设置为中断
-      const index = tasks.value.findIndex(t => t.fileMd5 === task.fileMd5);
-      tasks.value[index].status = UploadStatus.Break;
-    } finally {
-      // 无论成功或失败，都从活跃队列中移除
-      activeUploads.value.delete(task.fileMd5);
-      // 继续下一个任务
-      startUpload();
-    }
+  function cancelLocalUpload(task: Api.KnowledgeBase.UploadTask) {
+    directUploadControllers.get(task.fileMd5)?.forEach(controller => controller.abort());
+    directUploadControllers.delete(task.fileMd5);
+    activeUploads.value.delete(task.fileMd5);
   }
 
   return {
     tasks,
     activeUploads,
     enqueueUpload,
-    startUpload
+    startUpload,
+    cancelLocalUpload
   };
 });

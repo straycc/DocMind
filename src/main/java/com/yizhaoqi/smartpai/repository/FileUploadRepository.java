@@ -2,6 +2,7 @@ package com.yizhaoqi.smartpai.repository;
 
 import com.yizhaoqi.smartpai.model.FileUpload;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -10,11 +11,19 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
+import jakarta.persistence.LockModeType;
+
 @Repository
 public interface FileUploadRepository extends JpaRepository<FileUpload, Long> {
     Optional<FileUpload> findByFileMd5(String fileMd5);
     
     Optional<FileUpload> findByFileMd5AndUserId(String fileMd5, String userId);
+
+    Optional<FileUpload> findByIdAndUserId(Long id, String userId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT f FROM FileUpload f WHERE f.id = :id AND f.userId = :userId")
+    Optional<FileUpload> findOwnedByIdForUpdate(@Param("id") Long id, @Param("userId") String userId);
     
     Optional<FileUpload> findByFileNameAndIsPublicTrue(String fileName);
     
@@ -61,4 +70,6 @@ public interface FileUploadRepository extends JpaRepository<FileUpload, Long> {
     List<FileUpload> findByUserId(String userId);
 
     List<FileUpload> findByFileMd5In(List<String> md5List);
+
+    List<FileUpload> findByStatus(int status);
 }

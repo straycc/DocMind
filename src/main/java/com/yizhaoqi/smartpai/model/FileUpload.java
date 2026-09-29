@@ -13,7 +13,8 @@ import java.time.LocalDateTime;
  */
 @Data
 @Entity
-@Table(name = "file_upload")
+@Table(name = "file_upload", uniqueConstraints =
+        @UniqueConstraint(name = "uk_file_upload_owner_md5", columnNames = {"user_id", "file_md5"}))
 public class FileUpload {
     /**
      * 文件的唯一标识符
@@ -43,6 +44,47 @@ public class FileUpload {
      * 0表示文件正在上传中，1表示文件上传已完成
      */
     private int status; // 0-上传中 1-已完成
+
+    /** MinIO 中的原始合并文件对象键，避免消费端依赖会过期的预签名 URL。 */
+    @Column(name = "object_key", length = 1024)
+    private String objectKey;
+
+    /** 上传协议：LEGACY_CHUNK 或 S3_MULTIPART。 */
+    @Column(name = "upload_protocol", length = 32)
+    private String uploadProtocol;
+
+    /** MinIO 原生 Multipart Upload 会话 ID，仅在上传期间有效。 */
+    @Column(name = "minio_upload_id", length = 255)
+    private String minioUploadId;
+
+    /** Multipart 分片大小，单位字节。 */
+    @Column(name = "part_size")
+    private Long partSize;
+
+    /** Multipart 总分片数。 */
+    @Column(name = "total_parts")
+    private Integer totalParts;
+
+    /** 合并后的文件内容哈希，用于重建和完整性追踪。 */
+    @Column(name = "content_hash", length = 64)
+    private String contentHash;
+
+    @Column(name = "parser_version", length = 32)
+    private String parserVersion;
+
+    @Column(name = "chunker_version", length = 32)
+    private String chunkerVersion;
+
+    @Column(name = "embedding_version", length = 64)
+    private String embeddingVersion;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "processing_status", length = 32)
+    private DocumentProcessingStatus processingStatus;
+
+    @Lob
+    @Column(name = "processing_error")
+    private String processingError;
 
     /**
      * 上传文件的用户的标识符

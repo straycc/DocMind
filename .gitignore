@@ -85,3 +85,23 @@ CLAUDE.md
 
 /src/main/resources/application.yml
 /src/main/resources/application-dev.yml
+
+# 本地凭据与运行参数；仅提交模板文件。
+.env
+.env.*
+!.env.example
+
+# 本地数据库导出、备份与临时 SQL；正式 DDL 和迁移脚本继续纳入版本控制。
+*.local.sql
+*.dump.sql
+*.backup.sql
+
+# RAG 评测运行生成的报告。
+/rag-eval-results/*.json
+
+# JMeter 运行结果和 HTML Dashboard；保留可复现压测流程的 *.jmx 测试计划。
+*.jtl
+*.jmeter.log
+/jmeter-results/
+/jmeter-report/
+/load-test-results/

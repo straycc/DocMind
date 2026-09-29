@@ -48,12 +48,21 @@ public class EmbeddingClient {
             logger.info("开始生成向量，文本数量: {}", texts.size());
             
             List<float[]> all = new ArrayList<>(texts.size());
+            int totalBatches = (texts.size() + batchSize - 1) / batchSize;
+            int batchNumber = 0;
             for (int start = 0; start < texts.size(); start += batchSize) {
+                batchNumber++;
                 int end = Math.min(start + batchSize, texts.size());
                 List<String> sub = texts.subList(start, end);
                 logger.debug("调用向量 API, 批次: {}-{} (size={})", start, end - 1, sub.size());
                 String response = callApiOnce(sub);
                 all.addAll(parseVectors(response));
+
+                if (batchNumber % 50 == 0 || batchNumber == totalBatches) {
+                    int progress = end * 100 / texts.size();
+                    logger.info("向量生成进度：批次 {}/{}, 文本 {}/{} ({}%)",
+                            batchNumber, totalBatches, end, texts.size(), progress);
+                }
             }
             logger.info("成功生成向量，总数量: {}", all.size());
             return all;
@@ -61,6 +70,14 @@ public class EmbeddingClient {
             logger.error("调用向量化 API 失败: {}", e.getMessage(), e);
             throw new RuntimeException("向量生成失败", e);
         }
+    }
+
+    public String getModelId() {
+        return modelId;
+    }
+
+    public int getDimension() {
+        return dimension;
     }
 
     private String callApiOnce(List<String> batch) {

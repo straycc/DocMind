@@ -28,6 +28,13 @@ CREATE TABLE file_upload (
                              file_name    VARCHAR(255)     NOT NULL COMMENT '文件名称',
                              total_size   BIGINT           NOT NULL COMMENT '文件大小',
                              status       TINYINT          NOT NULL DEFAULT 0 COMMENT '上传状态',
+                             object_key   VARCHAR(1024)    DEFAULT NULL COMMENT 'MinIO 合并对象键',
+                             content_hash VARCHAR(64)      DEFAULT NULL COMMENT '文件 SHA-256',
+                             parser_version VARCHAR(32)    DEFAULT NULL COMMENT '解析版本',
+                             chunker_version VARCHAR(32)   DEFAULT NULL COMMENT '切片版本',
+                             embedding_version VARCHAR(64) DEFAULT NULL COMMENT '向量模型版本',
+                             processing_status VARCHAR(32) DEFAULT NULL COMMENT '处理生命周期状态',
+                             processing_error TEXT          DEFAULT NULL COMMENT '处理失败原因',
                              user_id      VARCHAR(64)      NOT NULL COMMENT '用户 ID',
                              org_tag      VARCHAR(50)      DEFAULT NULL COMMENT '组织标签',
                              is_public    BOOLEAN          NOT NULL DEFAULT FALSE COMMENT '是否公开',                             created_at   TIMESTAMP        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -45,13 +52,31 @@ CREATE TABLE chunk_info (
                             storage_path VARCHAR(255) NOT NULL COMMENT '分块在存储系统中的路径'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文件分块信息表';
 
-CREATE TABLE document_vectors (
-                                  vector_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '向量记录唯一标识',
-                                  file_md5 VARCHAR(32) NOT NULL COMMENT '关联的文件MD5值',
-                                  chunk_id INT NOT NULL COMMENT '文本分块序号',
-                                  text_content TEXT COMMENT '文本内容',
-                                  model_version VARCHAR(32) COMMENT '向量模型版本',
-                                  user_id VARCHAR(64) NOT NULL COMMENT '上传用户ID',
-                                  org_tag VARCHAR(50) COMMENT '文件所属组织标签',
-                                  is_public BOOLEAN NOT NULL DEFAULT FALSE COMMENT '文件是否公开'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文档向量存储表';
+-- V1 新管线的事实表。实际向量仅作为 Elasticsearch 检索投影保存。
+CREATE TABLE document_sections (
+                                  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                                  file_upload_id BIGINT NOT NULL,
+                                  ordinal INT NOT NULL,
+                                  title_path VARCHAR(2048) DEFAULT NULL,
+                                  page_start INT DEFAULT NULL,
+                                  page_end INT DEFAULT NULL,
+                                  INDEX idx_document_section_file (file_upload_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文档章节父块';
+
+CREATE TABLE document_chunks (
+                                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                                file_upload_id BIGINT NOT NULL,
+                                section_id BIGINT NOT NULL,
+                                ordinal INT NOT NULL,
+                                text_content LONGTEXT NOT NULL,
+                                title_path VARCHAR(2048) DEFAULT NULL,
+                                page_start INT DEFAULT NULL,
+                                page_end INT DEFAULT NULL,
+                                source_locator VARCHAR(2048) DEFAULT NULL,
+                                estimated_token_count INT NOT NULL,
+                                content_hash VARCHAR(64) NOT NULL,
+                                chunker_version VARCHAR(32) NOT NULL,
+                                UNIQUE KEY uk_document_chunk_version_ordinal (file_upload_id, chunker_version, ordinal),
+                                INDEX idx_document_chunk_file (file_upload_id),
+                                INDEX idx_document_chunk_section (section_id, ordinal)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文档检索子块';

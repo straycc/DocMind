@@ -1,17 +1,36 @@
 {
   "mappings": {
     "properties": {
+      "fileUploadId": {
+        "type": "long"
+      },
       "fileMd5": {
+        "type": "keyword"
+      },
+      "fileName": {
         "type": "keyword"
       },
       "chunkId": {
         "type": "integer"
+      },
+      "sectionId": {
+        "type": "long"
       },
       "textContent": {
         "type": "text",
         "analyzer": "ik_max_word",
         "search_analyzer": "ik_smart"
       },
+      "titlePath": {
+        "type": "text",
+        "fields": {
+          "keyword": { "type": "keyword", "ignore_above": 2048 }
+        }
+      },
+      "pageStart": { "type": "integer" },
+      "pageEnd": { "type": "integer" },
+      "sourceLocator": { "type": "keyword", "ignore_above": 2048 },
+      "estimatedTokenCount": { "type": "integer" },
       "vector": {
         "type": "dense_vector",
         "dims": 2048,

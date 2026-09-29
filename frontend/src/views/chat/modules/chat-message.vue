@@ -16,27 +16,19 @@ function handleCopy(content: string) {
 
 const chatStore = useChatStore();
 
-// 存储文件名和对应的事件处理
-const sourceFiles = ref<Array<{fileName: string, id: string}>>([]);
+const citedSources = computed(() => {
+  const citedIds = props.msg.citationValidation?.citedSourceIds || [];
+  return (props.msg.sources || []).filter(source => citedIds.includes(source.sourceId));
+});
 
-// 处理来源文件链接的函数
+// 将经过后端编号校验的引用标记渲染为可点击链接。
 function processSourceLinks(text: string): string {
-  // 匹配 (来源#数字: 文件名) 的正则表达式
-  const sourcePattern = /\(来源#(\d+):\s*([^)]+)\)/g;
+  const sourcePattern = /【来源#(\d+)】/g;
 
-  return text.replace(sourcePattern, (_match, sourceNum, fileName) => {
-    // 为文件名创建可点击的链接
-    const linkClass = 'source-file-link';
-    const encodedFileName = encodeURIComponent(fileName.trim());
-    const fileId = `source-file-${sourceFiles.value.length}`;
-
-    // 存储文件信息
-    sourceFiles.value.push({
-      fileName: encodedFileName,
-      id: fileId
-    });
-
-    return `(来源#${sourceNum}: <span class="${linkClass}" data-file-id="${fileId}">${fileName}</span>)`;
+  return text.replace(sourcePattern, (match, sourceId) => {
+    const source = (props.msg.sources || []).find(item => item.sourceId === Number(sourceId));
+    if (!source || !source.fileName) return match;
+    return `<span class="source-file-link" data-source-id="${source.sourceId}">${match}</span>`;
   });
 }
 
@@ -56,14 +48,12 @@ const content = computed(() => {
 function handleContentClick(event: MouseEvent) {
   const target = event.target as HTMLElement;
 
-  // 检查点击的是否是文件链接
+  // 检查是否是经过来源映射的文件链接。
   if (target.classList.contains('source-file-link')) {
-    const fileId = target.getAttribute('data-file-id');
-    if (fileId) {
-      const file = sourceFiles.value.find(f => f.id === fileId);
-      if (file) {
-        handleSourceFileClick(file.fileName);
-      }
+    const sourceId = Number(target.getAttribute('data-source-id'));
+    const source = (props.msg.sources || []).find(item => item.sourceId === sourceId);
+    if (source?.fileName) {
+      handleSourceFileClick(source.fileName);
     }
   }
 }
@@ -137,6 +127,27 @@ async function handleSourceFileClick(fileName: string) {
     <NText v-else-if="msg.status === 'error'" class="ml-12 mt-2 italic">服务器繁忙，请稍后再试</NText>
     <div v-else-if="msg.role === 'assistant'" class="mt-2 pl-12" @click="handleContentClick">
       <VueMarkdownIt :content="content" />
+      <NText
+        v-if="msg.citationValidation && !msg.citationValidation.allCitationIdsValid"
+        type="error"
+        class="mt-2 block text-3"
+      >
+        回答中存在未匹配的引用编号：{{ msg.citationValidation.invalidCitationIds.join('、') }}
+      </NText>
+      <div v-if="citedSources.length" class="mt-3 flex flex-wrap items-center gap-2 text-3">
+        <NText depth="3">引用来源：</NText>
+        <NTag
+          v-for="source in citedSources"
+          :key="source.sourceId"
+          size="small"
+          type="info"
+          :title="source.excerpt"
+          class="cursor-pointer"
+          @click.stop="source.fileName && handleSourceFileClick(source.fileName)"
+        >
+          【来源#{{ source.sourceId }}】{{ source.sourceLabel }}
+        </NTag>
+      </div>
     </div>
     <NText v-else-if="msg.role === 'user'" class="ml-12 mt-2 text-4">{{ content }}</NText>
     <NDivider class="ml-12 w-[calc(100%-3rem)] mb-0! mt-2!" />

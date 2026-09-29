@@ -1,0 +1,2 @@
+-- 已废弃：Section 精简后正文只存 document_chunks.text_content。
+-- 请改执行 v1_simplify_document_sections.sql；不要在新结构上执行本脚本。

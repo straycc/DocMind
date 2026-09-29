@@ -4,11 +4,13 @@ import co.elastic.clients.transport.endpoints.BooleanResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch.indices.CreateIndexRequest;
 import co.elastic.clients.elasticsearch.indices.ExistsRequest;
 import org.apache.http.ConnectionClosedException;
+import com.yizhaoqi.smartpai.service.ElasticsearchService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.io.StringReader;
 
 @Component
+@ConditionalOnProperty(name = "elasticsearch.index-initializer.enabled", havingValue = "true", matchIfMissing = true)
 public class EsIndexInitializer implements CommandLineRunner { //CommandLineRunner 是 Spring Boot 提供的一个接口，它的作用是在 Spring Boot 应用启动完成后，执行一些自定义的逻辑。
 
     private static final Logger logger = LoggerFactory.getLogger(EsIndexInitializer.class);
@@ -55,11 +58,11 @@ public class EsIndexInitializer implements CommandLineRunner { //CommandLineRunn
      */
     private void initializeIndex() throws Exception {
         // 检查索引是否存在
-        BooleanResponse existsResponse = esClient.indices().exists(ExistsRequest.of(e -> e.index("knowledge_base")));
+        BooleanResponse existsResponse = esClient.indices().exists(ExistsRequest.of(e -> e.index(ElasticsearchService.INDEX_NAME)));
         if (!existsResponse.value()) {
             createIndex();
         } else {
-            logger.info("索引 'knowledge_base' 已存在");
+            logger.info("索引 '{}' 已存在", ElasticsearchService.INDEX_NAME);
         }
     }
 
@@ -73,10 +76,10 @@ public class EsIndexInitializer implements CommandLineRunner { //CommandLineRunn
 
         // 创建索引并应用映射
         CreateIndexRequest createIndexRequest = CreateIndexRequest.of(c -> c
-                .index("knowledge_base") // 索引名称
+                .index(ElasticsearchService.INDEX_NAME) // 索引名称
                 .withJson(new StringReader(mappingJson)) // 使用 JSON 文件定义映射
         );
         esClient.indices().create(createIndexRequest);
-        logger.info("索引 'knowledge_base' 已创建");
+        logger.info("索引 '{}' 已创建", ElasticsearchService.INDEX_NAME);
     }
 }

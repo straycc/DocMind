@@ -125,6 +125,8 @@ const { columns, columnChecks, data, getData, loading } = useTable({
 
 const store = useKnowledgeBaseStore();
 const { tasks } = storeToRefs(store);
+// 同一文件的删除请求只能同时进行一次，避免重复点击触发并发删除。
+const deletingFileMd5s = ref(new Set<string>());
 onMounted(async () => {
   await getList();
 });
@@ -161,25 +163,40 @@ async function getList() {
 }
 
 async function handleDelete(fileMd5: string) {
-  const index = tasks.value.findIndex(task => task.fileMd5 === fileMd5);
+  if (deletingFileMd5s.value.has(fileMd5)) return;
 
-  if (index !== -1) {
+  const index = tasks.value.findIndex(task => task.fileMd5 === fileMd5);
+  if (index === -1) return;
+
+  deletingFileMd5s.value.add(fileMd5);
+
+  try {
+    const task = tasks.value[index];
+    store.cancelLocalUpload(task);
     tasks.value[index].requestIds?.forEach(requestId => {
       request.cancelRequest(requestId);
     });
-  }
 
-  // 如果文件一个分片也没有上传完成，则直接删除
-  if (tasks.value[index].uploadedChunks && tasks.value[index].uploadedChunks.length === 0) {
-    tasks.value.splice(index, 1);
-    return;
-  }
+    if (task.status !== UploadStatus.Completed && task.uploadProtocol === 'S3_MULTIPART' && task.fileUploadId) {
+      const { error } = await request({ url: `/upload/multipart/${task.fileUploadId}`, method: 'DELETE' });
+      if (!error) tasks.value.splice(index, 1);
+      return;
+    }
 
-  const { error } = await request({ url: `/documents/${fileMd5}`, method: 'DELETE' });
-  if (!error) {
-    tasks.value.splice(index, 1);
-    window.$message?.success('删除成功');
-    await getData();
+    // 尚未在服务端创建任务，直接从本地队列删除。
+    if (task.status !== UploadStatus.Completed && !task.fileUploadId) {
+      tasks.value.splice(index, 1);
+      return;
+    }
+
+    const { error } = await request({ url: `/documents/${fileMd5}`, method: 'DELETE' });
+    if (!error) {
+      tasks.value.splice(index, 1);
+      window.$message?.success('删除成功');
+      await getData();
+    }
+  } finally {
+    deletingFileMd5s.value.delete(fileMd5);
   }
 }
 
@@ -246,21 +263,16 @@ async function onBeforeUpload(
     return false;
   }
   loading.value = true;
-  const { error, data: progress } = await request<Api.KnowledgeBase.Progress>({
-    url: '/upload/status',
-    params: { file_md5: row.fileMd5 }
-  });
-  if (!error) {
+  try {
     row.file = options.file.file!;
     row.status = UploadStatus.Pending;
-    row.progress = progress.progress;
-    row.uploadedChunks = progress.uploaded;
     store.startUpload();
     loading.value = false;
     return true;
+  } catch {
+    loading.value = false;
+    return false;
   }
-  loading.value = false;
-  return false;
 }
 </script>
 

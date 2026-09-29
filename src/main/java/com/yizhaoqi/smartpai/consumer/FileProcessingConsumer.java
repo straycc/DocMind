@@ -1,129 +1,120 @@
 package com.yizhaoqi.smartpai.consumer;
 
 import com.yizhaoqi.smartpai.config.KafkaConfig;
+import com.yizhaoqi.smartpai.exception.NonRetryableFileProcessingException;
+import com.yizhaoqi.smartpai.model.DocumentProcessingStatus;
 import com.yizhaoqi.smartpai.model.FileProcessingTask;
+import com.yizhaoqi.smartpai.model.FileUpload;
+import com.yizhaoqi.smartpai.repository.FileUploadRepository;
 import com.yizhaoqi.smartpai.service.ParseService;
 import com.yizhaoqi.smartpai.service.VectorizationService;
+import io.minio.GetObjectArgs;
 import io.minio.MinioClient;
-import io.minio.errors.*;
+import io.minio.GetObjectResponse;
+import io.minio.errors.ErrorResponseException;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
-import java.io.*;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.security.InvalidKeyException;
-import java.security.NoSuchAlgorithmException;
+import java.util.Set;
 
+/** Kafka 至少一次消费的文档处理入口，只读取稳定的 MinIO objectKey。 */
 @Service
 @Slf4j
 public class FileProcessingConsumer {
-
     private final ParseService parseService;
     private final VectorizationService vectorizationService;
-    @Autowired
-    private KafkaConfig kafkaConfig;
+    private final FileUploadRepository fileUploadRepository;
+    private final MinioClient minioClient;
+    private final String bucketName;
 
-
-    public FileProcessingConsumer(ParseService parseService, VectorizationService vectorizationService) {
+    public FileProcessingConsumer(ParseService parseService, VectorizationService vectorizationService,
+                                 FileUploadRepository fileUploadRepository, MinioClient minioClient,
+                                 @Value("${minio.bucketName:uploads}") String bucketName) {
         this.parseService = parseService;
         this.vectorizationService = vectorizationService;
+        this.fileUploadRepository = fileUploadRepository;
+        this.minioClient = minioClient;
+        this.bucketName = bucketName;
     }
 
     @KafkaListener(topics = "#{kafkaConfig.getFileProcessingTopic()}", groupId = "#{kafkaConfig.getFileProcessingGroupId()}")
     public void processTask(FileProcessingTask task) {
-        log.info("Received task: {}", task);
-        log.info("文件权限信息: userId={}, orgTag={}, isPublic={}", 
-                task.getUserId(), task.getOrgTag(), task.isPublic());
-                
-        InputStream fileStream = null;
+        Long fileUploadId;
         try {
-            // 下载文件
-            fileStream = downloadFileFromStorage(task.getFilePath());
-            // 在 downloadFileFromStorage 返回后立即检查流是否可读
-            if (fileStream == null) {
-                throw new IOException("流为空");
+            fileUploadId = resolveFileUploadId(task);
+        } catch (IllegalArgumentException exception) {
+            throw new NonRetryableFileProcessingException("Kafka 任务无效: " + exception.getMessage(), exception);
+        }
+        FileUpload upload = fileUploadRepository.findById(fileUploadId)
+                .orElseThrow(() -> new NonRetryableFileProcessingException("文件上传记录不存在: " + fileUploadId));
+        String objectKey = task.getObjectKey() == null || task.getObjectKey().isBlank()
+                ? upload.getObjectKey() : task.getObjectKey();
+        if (objectKey == null || objectKey.isBlank()) {
+            markFailed(upload, "Kafka 任务缺少 objectKey");
+            throw new NonRetryableFileProcessingException("Kafka 任务缺少 objectKey");
+        }
+        try (GetObjectResponse object = minioClient.getObject(GetObjectArgs.builder()
+                .bucket(bucketName).object(objectKey).build())) {
+            DocumentProcessingStatus status = parseService.parseAndSave(fileUploadId, object);
+            if (status == DocumentProcessingStatus.NEEDS_OCR) {
+                log.info("扫描件待 OCR，跳过向量化: fileUploadId={}", fileUploadId);
+                return;
             }
-
-            // 强制转换为可缓存流
-            if (!fileStream.markSupported()) {
-                fileStream = new BufferedInputStream(fileStream);
+            vectorizationService.vectorize(fileUploadId);
+            log.info("文件处理完成: fileUploadId={}, objectKey={}", fileUploadId, objectKey);
+        } catch (Exception exception) {
+            markFailed(upload, exception.getMessage());
+            log.error("文件处理失败: fileUploadId={}, objectKey={}", fileUploadId, objectKey, exception);
+            if (isNonRetryable(exception)) {
+                throw new NonRetryableFileProcessingException("文件处理不可重试: " + fileUploadId, exception);
             }
-
-            // 解析文件
-            parseService.parseAndSave(task.getFileMd5(), fileStream, 
-                    task.getUserId(), task.getOrgTag(), task.isPublic());
-            log.info("文件解析完成，fileMd5: {}", task.getFileMd5());
-
-            // 向量化处理
-            vectorizationService.vectorize(task.getFileMd5(), 
-                    task.getUserId(), task.getOrgTag(), task.isPublic());
-            log.info("向量化完成，fileMd5: {}", task.getFileMd5());
-        } catch (Exception e) {
-            log.error("Error processing task: {}", task, e);
-            // 抛出异常让 Kafka 的 DefaultErrorHandler 捕获并触发重试 / 死信
-            throw new RuntimeException("Error processing task", e);
-        } finally {
-            // 确保关闭输入流
-            if (fileStream != null) {
-                try {
-                    fileStream.close();
-                } catch (IOException e) {
-                    log.error("Error closing file stream", e);
-                }
-            }
+            // 短暂异常交由 Kafka 指数退避重试；新表和 ES 的确定性记录保证重试不重复。
+            throw new IllegalStateException("文件处理失败: " + fileUploadId, exception);
         }
     }
 
-    /**
-     * 模拟从存储系统下载文件
-     *
-     * @param filePath 文件路径或 URL
-     * @return 文件输入流
-     */
-    private InputStream downloadFileFromStorage(String filePath) throws ServerException, InsufficientDataException, ErrorResponseException, IOException, NoSuchAlgorithmException, InvalidKeyException, InvalidResponseException, XmlParserException, InternalException {
-        log.info("Downloading file from storage: {}", filePath);
-
-        try {
-            // 如果是文件系统路径
-            File file = new File(filePath);
-            if (file.exists()) {
-                log.info("Detected file system path: {}", filePath);
-                return new FileInputStream(file);
+    /** 将明确的数据、对象或鉴权错误直接送入 DLT，避免无意义的重复调用。 */
+    private boolean isNonRetryable(Throwable exception) {
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof IllegalArgumentException) {
+                return true;
             }
-
-            // 如果是远程 URL
-            if (filePath.startsWith("http://") || filePath.startsWith("https://")) {
-                log.info("Detected remote URL: {}", filePath);
-                URL url = new URL(filePath);
-                HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-                connection.setRequestMethod("GET");
-                connection.setConnectTimeout(30000); // 连接超时30秒
-                connection.setReadTimeout(180000);   // 读取超时时间3分钟
-
-                // 添加必要的请求头
-                connection.setRequestProperty("User-Agent", "SmartPAI-FileProcessor/1.0");
-
-                int responseCode = connection.getResponseCode();
-                if (responseCode == HttpURLConnection.HTTP_OK) {
-                    log.info("Successfully connected to URL, starting download...");
-                    return connection.getInputStream();
-                } else if (responseCode == HttpURLConnection.HTTP_FORBIDDEN) {
-                    log.error("Access forbidden - possible expired presigned URL");
-                    throw new IOException("Access forbidden - the presigned URL may have expired");
-                } else {
-                    log.error("Failed to download file, HTTP response code: {} for URL: {}", responseCode, filePath);
-                    throw new IOException(String.format("Failed to download file, HTTP response code: %d", responseCode));
+            if (current instanceof WebClientResponseException responseException
+                    && responseException.getStatusCode().is4xxClientError()
+                    && responseException.getStatusCode().value() != 429) {
+                return true;
+            }
+            if (current instanceof ErrorResponseException minioException) {
+                String code = minioException.errorResponse().code();
+                if (Set.of("NoSuchKey", "NoSuchBucket", "AccessDenied", "InvalidAccessKeyId", "SignatureDoesNotMatch")
+                        .contains(code)) {
+                    return true;
                 }
             }
-
-            // 如果既不是文件路径也不是 URL
-            throw new IllegalArgumentException("Unsupported file path format: " + filePath);
-        } catch (Exception e) {
-            log.error("Error downloading file from storage: {}", filePath, e);
-            return null; // 或者抛出异常
+            current = current.getCause();
         }
+        return false;
+    }
+
+    private Long resolveFileUploadId(FileProcessingTask task) {
+        if (task.getFileUploadId() != null) {
+            return task.getFileUploadId();
+        }
+        if (task.getFileMd5() == null || task.getFileMd5().isBlank()) {
+            throw new IllegalArgumentException("Kafka 任务缺少 fileUploadId 和 fileMd5");
+        }
+        return fileUploadRepository.findByFileMd5(task.getFileMd5())
+                .map(FileUpload::getId)
+                .orElseThrow(() -> new IllegalArgumentException("文件上传记录不存在: " + task.getFileMd5()));
+    }
+
+    private void markFailed(FileUpload upload, String error) {
+        upload.setProcessingStatus(DocumentProcessingStatus.FAILED);
+        upload.setProcessingError(error == null ? "未知处理错误" : error.substring(0, Math.min(4000, error.length())));
+        fileUploadRepository.save(upload);
     }
 }

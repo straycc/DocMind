@@ -1,6 +1,7 @@
 package com.yizhaoqi.smartpai.service;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch._types.Conflicts;
 import co.elastic.clients.elasticsearch.core.BulkRequest;
 import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryRequest;
@@ -17,6 +18,8 @@ import java.util.List;
 // Elasticsearch操作封装服务
 @Service
 public class ElasticsearchService {
+    public static final String INDEX_NAME = "knowledge_base_v1";
+    private static final int BULK_BATCH_SIZE = 200;
 
     private static final Logger logger = LoggerFactory.getLogger(ElasticsearchService.class);
 
@@ -31,36 +34,24 @@ public class ElasticsearchService {
      * @param documents 文档列表，每个文档都将被索引到Elasticsearch中
      */
     public void bulkIndex(List<EsDocument> documents) {
-        try {
-            logger.info("开始批量索引文档到Elasticsearch，文档数量: {}", documents.size());
-            
-            // 将文档列表转换为批量操作列表，每个文档都对应一个索引操作
-            List<BulkOperation> bulkOperations = documents.stream()
-                    .map(doc -> BulkOperation.of(op -> op.index(idx -> idx
-                            .index("knowledge_base") // 指定索引名称
-                            .id(doc.getId()) // 使用文档的ID作为Elasticsearch中的文档ID
-                            .document(doc) // 将文档对象作为数据源
-                    )))
-                    .toList();
+        bulkIndex(INDEX_NAME, documents);
+    }
 
-            // 创建BulkRequest对象，并将批量操作列表添加到请求中
-            BulkRequest request = BulkRequest.of(b -> b.operations(bulkOperations));
-            
-            // 执行批量索引操作
-            BulkResponse response = esClient.bulk(request);
-            
-            // 检查响应结果
-            if (response.errors()) {
-                logger.error("批量索引过程中发生错误:");
-                for (BulkResponseItem item : response.items()) {
-                    if (item.error() != null) {
-                        logger.error("文档索引失败 - ID: {}, 错误: {}", item.id(), item.error().reason());
-                    }
-                }
-                throw new RuntimeException("批量索引部分失败，请检查日志");
-            } else {
-                logger.info("批量索引成功完成，文档数量: {}", documents.size());
+    /**
+     * 将文档写入指定索引。评测数据使用独立索引，避免与正式知识库混在一起。
+     */
+    public void bulkIndex(String indexName, List<EsDocument> documents) {
+        if (documents == null || documents.isEmpty()) {
+            return;
+        }
+        try {
+            logger.info("开始批量索引文档到 Elasticsearch，索引: {}, 文档数量: {}", indexName, documents.size());
+            for (int start = 0; start < documents.size(); start += BULK_BATCH_SIZE) {
+                int end = Math.min(start + BULK_BATCH_SIZE, documents.size());
+                bulkIndexBatch(indexName, documents.subList(start, end));
+                logger.info("Elasticsearch 批量索引进度：{}/{}", end, documents.size());
             }
+            logger.info("批量索引成功完成，索引: {}, 文档数量: {}", indexName, documents.size());
         } catch (Exception e) {
             logger.error("批量索引失败，文档数量: {}", documents.size(), e);
             // 如果发生异常，抛出运行时异常，表明批量索引失败
@@ -75,12 +66,49 @@ public class ElasticsearchService {
     public void deleteByFileMd5(String fileMd5) {
         try {
             DeleteByQueryRequest request = DeleteByQueryRequest.of(d -> d
-                    .index("knowledge_base")
+                    .index(INDEX_NAME)
+                    // 删除接口允许重复调用；其他请求已删掉同一投影时，跳过版本冲突。
+                    .conflicts(Conflicts.Proceed)
                     .query(q -> q.term(t -> t.field("fileMd5").value(fileMd5)))
             );
             esClient.deleteByQuery(request);
         } catch (Exception e) {
             throw new RuntimeException("删除文档失败", e);
         }
+    }
+
+    /** 删除指定文件当前版本的 ES 投影，供至少一次消费重试使用。 */
+    public void deleteByFileUploadId(Long fileUploadId) {
+        try {
+            DeleteByQueryRequest request = DeleteByQueryRequest.of(d -> d
+                    .index(INDEX_NAME)
+                    // Kafka 重试或用户重复点击删除时，ES 子文档可能已被并发删除。
+                    .conflicts(Conflicts.Proceed)
+                    .query(q -> q.term(t -> t.field("fileUploadId").value(fileUploadId))));
+            esClient.deleteByQuery(request);
+        } catch (Exception e) {
+            throw new RuntimeException("删除文件 ES 投影失败", e);
+        }
+    }
+
+    /** 单批写入，控制请求体大小，避免大规模向量导入触发 ES HTTP 限制。 */
+    private void bulkIndexBatch(String indexName, List<EsDocument> documents) throws Exception {
+        List<BulkOperation> bulkOperations = documents.stream()
+                .map(doc -> BulkOperation.of(op -> op.index(idx -> idx
+                        .index(indexName)
+                        .id(doc.getId())
+                        .document(doc))))
+                .toList();
+        BulkRequest request = BulkRequest.of(builder -> builder.operations(bulkOperations));
+        BulkResponse response = esClient.bulk(request);
+        if (!response.errors()) {
+            return;
+        }
+        for (BulkResponseItem item : response.items()) {
+            if (item.error() != null) {
+                logger.error("文档索引失败 - ID: {}, 错误: {}", item.id(), item.error().reason());
+            }
+        }
+        throw new RuntimeException("批量索引部分失败，请检查日志");
     }
 }

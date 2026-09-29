@@ -114,11 +114,16 @@ declare namespace Api {
     }
 
     interface SearchResult {
+      fileUploadId?: number;
       fileMd5: string;
       chunkId: number;
       textContent: string;
       score: number;
       fileName: string;
+      titlePath?: string;
+      pageStart?: number;
+      pageEnd?: number;
+      sourceLabel?: string;
     }
 
     interface UploadState {
@@ -134,8 +139,9 @@ declare namespace Api {
     }
 
     interface UploadTask {
-      file: File;
-      chunk: Blob | null;
+      file?: File;
+      chunk?: Blob | null;
+      fileUploadId?: number;
       fileMd5: string;
       chunkIndex: number;
       totalSize: number;
@@ -150,6 +156,9 @@ declare namespace Api {
       createdAt?: string;
       mergedAt?: string;
       requestIds?: string[]; // 请求ID，用于取消上传
+      uploadProtocol?: 'S3_MULTIPART' | 'LEGACY_CHUNK';
+      partSize?: number;
+      totalParts?: number;
     }
     type List = Common.PaginatingQueryRecord<UploadTask>;
 
@@ -165,6 +174,36 @@ declare namespace Api {
       objectUrl: string;
       fileSize: number;
     }
+
+    interface MultipartInit {
+      fileUploadId: number;
+      uploadId: string | null;
+      objectKey: string;
+      partSize: number;
+      totalParts: number;
+      status: 'UPLOADING' | 'COMPLETED';
+    }
+
+    interface MultipartPart {
+      partNumber: number;
+      etag: string;
+      size: number;
+    }
+
+    interface MultipartStatus {
+      fileUploadId: number;
+      status: 'UPLOADING' | 'COMPLETED' | 'ABORTED';
+      partSize: number;
+      totalParts: number;
+      uploadedParts: MultipartPart[];
+      progress: number;
+    }
+
+    interface MultipartPresign {
+      partNumber: number;
+      url: string;
+      expiresInSeconds: number;
+    }
   }
 
   namespace Chat {
@@ -177,6 +216,25 @@ declare namespace Api {
       chunk: string;
     }
 
+    interface Source {
+      sourceId: number;
+      fileUploadId: number | null;
+      chunkOrdinal: number | null;
+      fileName: string | null;
+      titlePath: string | null;
+      pageStart: number | null;
+      pageEnd: number | null;
+      sourceLabel: string;
+      excerpt: string;
+    }
+
+    interface CitationValidation {
+      citedSourceIds: number[];
+      invalidCitationIds: number[];
+      hasCitation: boolean;
+      allCitationIdsValid: boolean;
+    }
+
     interface Conversation {
       conversationId: string;
     }
@@ -186,6 +244,8 @@ declare namespace Api {
       content: string;
       status?: 'pending' | 'loading' | 'finished' | 'error';
       timestamp?: string;
+      sources?: Source[];
+      citationValidation?: CitationValidation;
     }
 
     interface Token {

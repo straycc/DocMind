@@ -2,6 +2,7 @@ package com.yizhaoqi.smartpai.service;
 
 import com.yizhaoqi.smartpai.model.ChunkInfo;
 import com.yizhaoqi.smartpai.model.FileUpload;
+import com.yizhaoqi.smartpai.model.DocumentProcessingStatus;
 import com.yizhaoqi.smartpai.repository.ChunkInfoRepository;
 import com.yizhaoqi.smartpai.repository.FileUploadRepository;
 import io.minio.*;
@@ -576,7 +577,8 @@ public class UploadService {
             }
             logger.info("分片检查完成，所有分片都存在 => fileMd5: {}, fileName: {}, fileType: {}", fileMd5, fileName, fileType);
             
-            String mergedPath = "merged/" + fileName;
+            // 使用文件哈希隔离对象键，避免同名文件在 MinIO 中相互覆盖。
+            String mergedPath = "merged/" + fileMd5 + "/" + fileName;
             logger.info("开始合并分片 => fileMd5: {}, fileName: {}, fileType: {}, 合并后路径: {}", fileMd5, fileName, fileType, mergedPath);
             
             try {
@@ -637,6 +639,9 @@ public class UploadService {
                             return new RuntimeException("文件记录不存在: " + fileMd5);
                         });
                 fileUpload.setStatus(1); // 已完成
+                fileUpload.setObjectKey(mergedPath);
+                fileUpload.setProcessingStatus(DocumentProcessingStatus.UPLOADED);
+                fileUpload.setProcessingError(null);
                 fileUpload.setMergedAt(LocalDateTime.now());
                 fileUploadRepository.save(fileUpload);
                 logger.info("文件状态已更新为已完成 => fileMd5: {}, fileName: {}, fileType: {}", fileMd5, fileName, fileType);

@@ -46,7 +46,8 @@ public class DeepSeekClient {
                              String context,
                              List<Map<String, String>> history,
                              Consumer<String> onChunk,
-                             Consumer<Throwable> onError) {
+                             Consumer<Throwable> onError,
+                             Runnable onComplete) {
         
         Map<String, Object> request = buildRequest(userMessage, context, history);
         
@@ -58,7 +59,8 @@ public class DeepSeekClient {
                 .bodyToFlux(String.class)
                 .subscribe(
                     chunk -> processChunk(chunk, onChunk),
-                    onError
+                    onError,
+                    onComplete
                 );
     }
 
@@ -97,25 +99,12 @@ public class DeepSeekClient {
 
         AiProperties.Prompt promptCfg = aiProperties.getPrompt();
 
-        // 1. 构建统一的 system 指令（规则 + 参考信息）
+        // 1. system 仅放不可被文档覆盖的规则，检索正文不能混入 system 指令。
         StringBuilder sysBuilder = new StringBuilder();
         String rules = promptCfg.getRules();
-        if (rules != null) {
+        if (rules != null && !rules.isBlank()) {
             sysBuilder.append(rules).append("\n\n");
         }
-
-        String refStart = promptCfg.getRefStart() != null ? promptCfg.getRefStart() : "<<REF>>";
-        String refEnd = promptCfg.getRefEnd() != null ? promptCfg.getRefEnd() : "<<END>>";
-        sysBuilder.append(refStart).append("\n");
-
-        if (context != null && !context.isEmpty()) {
-            sysBuilder.append(context);
-        } else {
-            String noResult = promptCfg.getNoResultText() != null ? promptCfg.getNoResultText() : "（本轮无检索结果）";
-            sysBuilder.append(noResult).append("\n");
-        }
-
-        sysBuilder.append(refEnd);
 
         String systemContent = sysBuilder.toString();
         messages.add(Map.of(
@@ -124,12 +113,31 @@ public class DeepSeekClient {
         ));
         logger.debug("添加了系统消息，长度: {}", systemContent.length());
 
-        // 2. 追加历史消息（若有）
+        // 2. 追加历史消息（只保留 OpenAI 消息协议允许的字段）。
         if (history != null && !history.isEmpty()) {
-            messages.addAll(history);
+            for (Map<String, String> historyMessage : history) {
+                String role = historyMessage.get("role");
+                String content = historyMessage.get("content");
+                if (("user".equals(role) || "assistant".equals(role)) && content != null) {
+                    messages.add(Map.of("role", role, "content", content));
+                }
+            }
         }
 
-        // 3. 当前用户问题
+        // 3. 来源以普通用户消息单独传递，模型必须把它视为不可信资料而非指令。
+        String refStart = promptCfg.getRefStart() != null ? promptCfg.getRefStart() : "<knowledge_sources>";
+        String refEnd = promptCfg.getRefEnd() != null ? promptCfg.getRefEnd() : "</knowledge_sources>";
+        String sourceContent = context;
+        if (sourceContent == null || sourceContent.isBlank()) {
+            sourceContent = promptCfg.getNoResultText() != null
+                    ? promptCfg.getNoResultText() : "（本轮无检索结果）";
+        }
+        messages.add(Map.of(
+                "role", "user",
+                "content", refStart + "\n" + sourceContent + "\n" + refEnd
+        ));
+
+        // 4. 当前用户问题
         messages.add(Map.of(
             "role", "user",
             "content", userMessage

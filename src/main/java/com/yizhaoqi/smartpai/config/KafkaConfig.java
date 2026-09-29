@@ -15,7 +15,9 @@ import org.apache.kafka.common.TopicPartition;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
-import org.springframework.util.backoff.FixedBackOff;
+import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.support.ExponentialBackOffWithMaxRetries;
+import com.yizhaoqi.smartpai.exception.NonRetryableFileProcessingException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -70,12 +72,15 @@ public class KafkaConfig {
     @Bean
     public ConsumerFactory<String, Object> consumerFactory() {
         Map<String, Object> config = new HashMap<>();
-//        config.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false); // 禁用自动提交偏移量
         config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         config.put(ConsumerConfig.GROUP_ID_CONFIG, fileProcessingGroupId);
         config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
         config.put(JsonDeserializer.TRUSTED_PACKAGES, trustedPackages);
+        // 文档解析与向量化可能耗时数分钟，必须在业务成功后才提交 offset。
+        config.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        config.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 1);
+        config.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, 30 * 60 * 1000);
         return new DefaultKafkaConsumerFactory<>(config);
     }
 
@@ -92,12 +97,18 @@ public class KafkaConfig {
                 kafkaTemplate,
                 (record, ex) -> new TopicPartition(fileProcessingDltTopic, record.partition()));
 
-        // 固定退避策略：每 3 秒重试一次，最多重试 4 次（加首次共 5 次）
-        DefaultErrorHandler errorHandler = new DefaultErrorHandler(recoverer, new FixedBackOff(3000L, 4));
+        // 短暂故障按 1、2、4、8 秒退避；4 次重试均失败后进入 DLT。
+        ExponentialBackOffWithMaxRetries backOff = new ExponentialBackOffWithMaxRetries(4);
+        backOff.setInitialInterval(1_000L);
+        backOff.setMultiplier(2.0);
+        backOff.setMaxInterval(8_000L);
+        DefaultErrorHandler errorHandler = new DefaultErrorHandler(recoverer, backOff);
+        errorHandler.addNotRetryableExceptions(NonRetryableFileProcessingException.class);
 
         ConcurrentKafkaListenerContainerFactory<String, Object> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.setCommonErrorHandler(errorHandler);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
         return factory;
     }
 }

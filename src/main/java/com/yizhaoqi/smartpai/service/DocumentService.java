@@ -2,7 +2,8 @@ package com.yizhaoqi.smartpai.service;
 
 import com.yizhaoqi.smartpai.model.FileUpload;
 import com.yizhaoqi.smartpai.model.User;
-import com.yizhaoqi.smartpai.repository.DocumentVectorRepository;
+import com.yizhaoqi.smartpai.repository.DocumentChunkRepository;
+import com.yizhaoqi.smartpai.repository.DocumentSectionRepository;
 import com.yizhaoqi.smartpai.repository.FileUploadRepository;
 import com.yizhaoqi.smartpai.repository.UserRepository;
 import io.minio.GetObjectArgs;
@@ -36,7 +37,10 @@ public class DocumentService {
     private FileUploadRepository fileUploadRepository;
 
     @Autowired
-    private DocumentVectorRepository documentVectorRepository;
+    private DocumentChunkRepository documentChunkRepository;
+
+    @Autowired
+    private DocumentSectionRepository documentSectionRepository;
 
     @Autowired
     private MinioClient minioClient;
@@ -54,9 +58,9 @@ public class DocumentService {
      * 删除文档及其相关数据
      * 该方法将删除:
      * 1. FileUpload记录
-     * 2. DocumentVector记录
-     * 3. MinIO中的文件
-     * 4. Elasticsearch中的向量数据
+     * 2. DocumentSection 和 DocumentChunk 记录
+     * 3. MinIO 中的文件
+     * 4. Elasticsearch 中的检索投影
      *
      * @param fileMd5 文件MD5
      */
@@ -71,7 +75,7 @@ public class DocumentService {
             
             // 1. 删除Elasticsearch中的数据
             try {
-                elasticsearchService.deleteByFileMd5(fileMd5);
+                elasticsearchService.deleteByFileUploadId(fileUpload.getId());
                 logger.info("成功从Elasticsearch删除文档: {}", fileMd5);
             } catch (Exception e) {
                 logger.error("从Elasticsearch删除文档时出错: {}", fileMd5, e);
@@ -80,7 +84,8 @@ public class DocumentService {
             
             // 2. 删除MinIO中的文件
             try {
-                String objectName = "merged/" + fileUpload.getFileName();
+                String objectName = fileUpload.getObjectKey() == null ? "merged/" + fileUpload.getFileName()
+                        : fileUpload.getObjectKey();
                 minioClient.removeObject(
                         RemoveObjectArgs.builder()
                                 .bucket("uploads")
@@ -93,12 +98,13 @@ public class DocumentService {
                 // 继续删除其他数据
             }
             
-            // 3. 删除DocumentVector记录
+            // 3. 删除新版事实子块和章节
             try {
-                documentVectorRepository.deleteByFileMd5(fileMd5);
-                logger.info("成功删除文档向量记录: {}", fileMd5);
+                documentChunkRepository.deleteByFileUploadId(fileUpload.getId());
+                documentSectionRepository.deleteByFileUploadId(fileUpload.getId());
+                logger.info("成功删除文档章节和子块: {}", fileMd5);
             } catch (Exception e) {
-                logger.error("删除文档向量记录时出错: {}", fileMd5, e);
+                logger.error("删除文档章节和子块时出错: {}", fileMd5, e);
                 // 继续删除其他数据
             }
             
@@ -186,7 +192,8 @@ public class DocumentService {
                     .orElseThrow(() -> new RuntimeException("文件不存在: " + fileMd5));
             
             // MinIO中的对象路径格式: merged/文件名
-            String objectName = "merged/" + fileUpload.getFileName();
+            String objectName = fileUpload.getObjectKey() == null ? "merged/" + fileUpload.getFileName()
+                    : fileUpload.getObjectKey();
             
             // 生成预签名URL，有效期1小时
             String presignedUrl = minioClient.getPresignedObjectUrl(

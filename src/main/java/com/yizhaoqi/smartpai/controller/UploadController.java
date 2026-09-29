@@ -282,8 +282,9 @@ public class UploadController {
                     request.fileMd5(), request.fileName(), fileType, fileUpload.getOrgTag(), fileUpload.isPublic());
             
             FileProcessingTask task = new FileProcessingTask(
+                    fileUpload.getId(),
+                    fileUpload.getObjectKey(),
                     request.fileMd5(),
-                    objectUrl,
                     request.fileName(),
                     fileUpload.getUserId(),
                     fileUpload.getOrgTag(),

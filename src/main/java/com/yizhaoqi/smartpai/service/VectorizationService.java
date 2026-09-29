@@ -1,102 +1,105 @@
 package com.yizhaoqi.smartpai.service;
 
 import com.yizhaoqi.smartpai.client.EmbeddingClient;
-import com.yizhaoqi.smartpai.model.DocumentVector;
 import com.yizhaoqi.smartpai.entity.EsDocument;
-import com.yizhaoqi.smartpai.entity.TextChunk;
-import com.yizhaoqi.smartpai.repository.DocumentVectorRepository;
+import com.yizhaoqi.smartpai.model.DocumentChunk;
+import com.yizhaoqi.smartpai.model.DocumentProcessingStatus;
+import com.yizhaoqi.smartpai.model.FileUpload;
+import com.yizhaoqi.smartpai.repository.DocumentChunkRepository;
+import com.yizhaoqi.smartpai.repository.FileUploadRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.UUID;
 import java.util.stream.IntStream;
 
-// 向量化服务类
+/** 从 MySQL 子块事实记录生成 Elasticsearch 全文和向量检索投影。 */
 @Service
 public class VectorizationService {
-
     private static final Logger logger = LoggerFactory.getLogger(VectorizationService.class);
 
-    @Autowired
-    private EmbeddingClient embeddingClient;
+    private final EmbeddingClient embeddingClient;
+    private final ElasticsearchService elasticsearchService;
+    private final DocumentChunkRepository chunkRepository;
+    private final FileUploadRepository fileUploadRepository;
 
-    @Autowired
-    private ElasticsearchService elasticsearchService;
+    public VectorizationService(EmbeddingClient embeddingClient, ElasticsearchService elasticsearchService,
+                                DocumentChunkRepository chunkRepository, FileUploadRepository fileUploadRepository) {
+        this.embeddingClient = embeddingClient;
+        this.elasticsearchService = elasticsearchService;
+        this.chunkRepository = chunkRepository;
+        this.fileUploadRepository = fileUploadRepository;
+    }
 
-    @Autowired
-    private DocumentVectorRepository documentVectorRepository;
-
-    /**
-     * 执行向量化操作
-     * @param fileMd5 文件指纹
-     * @param userId 上传用户ID
-     * @param orgTag 组织标签
-     * @param isPublic 是否公开
-     */
-    public void vectorize(String fileMd5, String userId, String orgTag, boolean isPublic) {
+    @Transactional(noRollbackFor = IllegalStateException.class)
+    public void vectorize(Long fileUploadId) {
+        FileUpload upload = fileUploadRepository.findById(fileUploadId)
+                .orElseThrow(() -> new IllegalArgumentException("文件上传记录不存在: " + fileUploadId));
+        List<DocumentChunk> chunks = chunkRepository.findByFileUploadIdOrderByOrdinalAsc(fileUploadId);
+        if (chunks.isEmpty()) {
+            upload.setProcessingStatus(DocumentProcessingStatus.FAILED);
+            upload.setProcessingError("没有可向量化的文档子块");
+            fileUploadRepository.save(upload);
+            throw new IllegalStateException("没有可向量化的文档子块");
+        }
         try {
-            logger.info("开始向量化文件，fileMd5: {}, userId: {}, orgTag: {}, isPublic: {}", 
-                       fileMd5, userId, orgTag, isPublic);
-                       
-            // 获取文件分块内容
-            List<TextChunk> chunks = fetchTextChunks(fileMd5);
-            if (chunks == null || chunks.isEmpty()) {
-                logger.warn("未找到分块内容，fileMd5: {}", fileMd5);
-                return;
-            }
+            upload.setProcessingStatus(DocumentProcessingStatus.EMBEDDING);
+            upload.setProcessingError(null);
+            fileUploadRepository.save(upload);
+            List<float[]> vectors = embeddingClient.embed(chunks.stream()
+                    .map(chunk -> DocumentEmbeddingTextBuilder.build(upload.getFileName(), chunk.getTitlePath(),
+                            chunk.getTextContent()))
+                    .toList());
+            validateVectors(vectors, chunks.size());
 
-            // 提取文本内容
-            List<String> texts = chunks.stream()
-                    .map(TextChunk::getContent)
-                    .toList();
-
-            // 调用外部模型生成向量
-            List<float[]> vectors = embeddingClient.embed(texts);
-
-            // 构建 Elasticsearch 文档并存储
-            List<EsDocument> esDocuments = IntStream.range(0, chunks.size())
-                    .mapToObj(i -> new EsDocument(
-                            UUID.randomUUID().toString(),
-                            fileMd5,
-                            chunks.get(i).getChunkId(),
-                            chunks.get(i).getContent(),
-                            vectors.get(i),
-                            "deepseek-embed", // 更新为 DeepSeek 的模型版本
-                            userId,
-                            orgTag,
-                            isPublic
-                    ))
-                    .toList();
-
-            elasticsearchService.bulkIndex(esDocuments); // 批量存储到 Elasticsearch
-
-            logger.info("向量化完成，fileMd5: {}", fileMd5);
-        } catch (Exception e) {
-            logger.error("向量化失败，fileMd5: {}", fileMd5, e);
-            throw new RuntimeException("向量化失败", e);
+            // 先清除旧投影，bulk 失败时保留 MySQL 子块以便仅重试向量化。
+            elasticsearchService.deleteByFileUploadId(fileUploadId);
+            List<EsDocument> documents = IntStream.range(0, chunks.size()).mapToObj(index -> {
+                DocumentChunk chunk = chunks.get(index);
+                return new EsDocument(fileUploadId + ":" + chunk.getChunkerVersion() + ":" + chunk.getOrdinal(),
+                        fileUploadId, upload.getFileMd5(), upload.getFileName(), chunk.getOrdinal(), chunk.getSectionId(), chunk.getTextContent(),
+                        chunk.getTitlePath(), chunk.getPageStart(), chunk.getPageEnd(), chunk.getSourceLocator(),
+                        chunk.getEstimatedTokenCount(), vectors.get(index), embeddingClient.getModelId(), upload.getUserId(),
+                        upload.getOrgTag(), upload.isPublic());
+            }).toList();
+            elasticsearchService.bulkIndex(documents);
+            upload.setEmbeddingVersion(embeddingClient.getModelId());
+            upload.setProcessingStatus(DocumentProcessingStatus.READY);
+            upload.setProcessingError(null);
+            fileUploadRepository.save(upload);
+            logger.info("文件向量化完成: fileUploadId={}, chunks={}", fileUploadId, chunks.size());
+        } catch (Exception exception) {
+            upload.setProcessingStatus(DocumentProcessingStatus.FAILED);
+            upload.setProcessingError(limitError(exception));
+            fileUploadRepository.save(upload);
+            throw new IllegalStateException("文档向量化失败: " + fileUploadId, exception);
         }
     }
-    
 
-    /**
-     * 获取文件分块内容
-     * @param fileMd5 文件指纹
-     * @return 分块内容列表
-     */
-    // 从数据库获取分块内容
-    private List<TextChunk> fetchTextChunks(String fileMd5) {
-        // 调用 Repository 查询数据
-        List<DocumentVector> vectors = documentVectorRepository.findByFileMd5(fileMd5);
+    /** 向后兼容旧入口；权限信息以 file_upload 中的事实字段为准。 */
+    public void vectorize(String fileMd5, String userId, String orgTag, boolean isPublic) {
+        FileUpload upload = fileUploadRepository.findByFileMd5(fileMd5)
+                .orElseThrow(() -> new IllegalArgumentException("文件上传记录不存在: " + fileMd5));
+        vectorize(upload.getId());
+    }
 
-        // 转换为 TextChunk 列表
-        return vectors.stream()
-                .map(vector -> new TextChunk(
-                        vector.getChunkId(),
-                        vector.getTextContent()
-                ))
-                .toList();
+    private void validateVectors(List<float[]> vectors, int expectedCount) {
+        if (vectors == null || vectors.size() != expectedCount) {
+            throw new IllegalStateException("Embedding 返回数量不匹配，期望=" + expectedCount
+                    + "，实际=" + (vectors == null ? 0 : vectors.size()));
+        }
+        for (float[] vector : vectors) {
+            if (vector == null || vector.length != embeddingClient.getDimension()) {
+                throw new IllegalStateException("Embedding 维度不匹配，期望=" + embeddingClient.getDimension()
+                        + "，实际=" + (vector == null ? 0 : vector.length));
+            }
+        }
+    }
+
+    private String limitError(Exception exception) {
+        String text = exception.getClass().getSimpleName() + ": " + exception.getMessage();
+        return text.length() > 4000 ? text.substring(0, 4000) : text;
     }
 }
