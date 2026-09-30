@@ -9,10 +9,10 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.yizhaoqi</groupId>
-    <artifactId>SmartPAI</artifactId>
+    <artifactId>docmind</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>SmartPAI</name>
-    <description>SmartPAI</description>
+    <name>DocMind</name>
+    <description>DocMind - 智能知识库助手</description>
     <url/>
     <licenses>
         <license/>

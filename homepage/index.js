@@ -143,10 +143,10 @@ function closeNavDropdown(event) {
  */
 
 const typed = new Typed('#prompts-sample', {
-    strings: ["派聪明RAG知识库是什么？",
-        "派聪明能让大家学到什么？",
-        "派聪明如何写到简历上？",
-        "派聪明包含哪些功能模块？"],
+    strings: ["DocMind RAG 知识库是什么？",
+        "DocMind 能让大家学到什么？",
+        "DocMind 如何写到简历上？",
+        "DocMind 包含哪些功能模块？"],
     typeSpeed: 80,
     smartBackspace: true,
     loop: true,

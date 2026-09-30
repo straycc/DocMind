@@ -39,7 +39,7 @@ spring:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
-        spring.json.trusted.packages: ${KAFKA_TRUSTED_PACKAGES:com.yizhaoqi.smartpai.model}
+        spring.json.trusted.packages: ${KAFKA_TRUSTED_PACKAGES:com.yizhaoqi.docmind.model}
     listener:
       concurrency: ${KAFKA_LISTENER_CONCURRENCY:3}
     topic:
