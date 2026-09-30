@@ -119,8 +119,8 @@ public class ConversationController {
         if (json != null) {
             try {
                 // 将原始Redis数据转换为前端可用的格式
-                List<Map<String, String>> history = objectMapper.readValue(json, 
-                        new TypeReference<List<Map<String, String>>>() {});
+                List<Map<String, Object>> history = objectMapper.readValue(json,
+                        new TypeReference<List<Map<String, Object>>>() {});
                 
                 // 解析时间范围
                 LocalDateTime startDateTime = null;
@@ -147,8 +147,8 @@ public class ConversationController {
                 }
                 
                 // 将对话转换为前端需要的格式，使用存储的时间戳并进行时间过滤
-                for (Map<String, String> message : history) {
-                    String messageTimestamp = message.getOrDefault("timestamp", "未知时间");
+                for (Map<String, Object> message : history) {
+                    String messageTimestamp = String.valueOf(message.getOrDefault("timestamp", "未知时间"));
                     
                     // 时间过滤
                     if (startDateTime != null || endDateTime != null) {
@@ -179,6 +179,7 @@ public class ConversationController {
                     messageWithTimestamp.put("role", message.get("role"));
                     messageWithTimestamp.put("content", message.get("content"));
                     messageWithTimestamp.put("timestamp", messageTimestamp);
+                    messageWithTimestamp.put("sources", message.getOrDefault("sources", List.of()));
                     formattedConversations.add(messageWithTimestamp);
                 }
                 

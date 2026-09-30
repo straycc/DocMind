@@ -43,6 +43,7 @@ public class MultipartUploadService {
     private final FileUploadRepository fileUploadRepository;
     private final UserService userService;
     private final FileTypeValidationService fileTypeValidationService;
+    private final OutboxEventService outboxEventService;
     private final String bucket;
     private final int presignExpiryMinutes;
 
@@ -51,12 +52,14 @@ public class MultipartUploadService {
             FileUploadRepository fileUploadRepository,
             UserService userService,
             FileTypeValidationService fileTypeValidationService,
+            OutboxEventService outboxEventService,
             @Value("${minio.bucketName:uploads}") String bucket,
             @Value("${upload.multipart.presign-expiry-minutes:15}") int presignExpiryMinutes) {
         this.minioClient = minioClient;
         this.fileUploadRepository = fileUploadRepository;
         this.userService = userService;
         this.fileTypeValidationService = fileTypeValidationService;
+        this.outboxEventService = outboxEventService;
         this.bucket = bucket;
         this.presignExpiryMinutes = presignExpiryMinutes;
     }
@@ -162,6 +165,7 @@ public class MultipartUploadService {
         FileUpload upload = fileUploadRepository.findOwnedByIdForUpdate(fileUploadId, userId)
                 .orElseThrow(() -> new NoSuchElementException("上传任务不存在"));
         if (upload.getStatus() == STATUS_COMPLETED) {
+            ensurePendingProcessingEvent(upload);
             return completedResponse(upload, false);
         }
         requireMultipartUploading(upload);
@@ -284,6 +288,14 @@ public class MultipartUploadService {
         upload.setProcessingError(null);
         upload.setMergedAt(LocalDateTime.now());
         fileUploadRepository.save(upload);
+        outboxEventService.recordDocumentProcessingRequested(upload);
+    }
+
+    /** 为历史故障窗口补齐任务；READY/NEEDS_OCR 等终态不会重复创建处理事件。 */
+    private void ensurePendingProcessingEvent(FileUpload upload) {
+        if (upload.getProcessingStatus() == DocumentProcessingStatus.UPLOADED) {
+            outboxEventService.recordDocumentProcessingRequested(upload);
+        }
     }
 
     private InitResponse toInitResponse(FileUpload upload) {

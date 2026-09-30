@@ -40,6 +40,8 @@ spring:
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
         spring.json.trusted.packages: ${KAFKA_TRUSTED_PACKAGES:com.yizhaoqi.smartpai.model}
+    listener:
+      concurrency: ${KAFKA_LISTENER_CONCURRENCY:3}
     topic:
       file-processing: ${KAFKA_FILE_PROCESSING_TOPIC:file-processing-topic}
       dlt: ${KAFKA_DLT_TOPIC:file-processing-dlt}
@@ -57,6 +59,19 @@ upload:
   multipart:
     # 单个Part预签名地址的有效期；过期后前端可重新申请，不影响已经上传的Part。
     presign-expiry-minutes: ${UPLOAD_PRESIGN_EXPIRY_MINUTES:15}
+
+outbox:
+  dispatcher:
+    enabled: ${OUTBOX_DISPATCHER_ENABLED:true}
+    fixed-delay-ms: ${OUTBOX_FIXED_DELAY_MS:5000}
+    initial-delay-ms: ${OUTBOX_INITIAL_DELAY_MS:5000}
+    batch-size: ${OUTBOX_BATCH_SIZE:20}
+    lease-seconds: ${OUTBOX_LEASE_SECONDS:60}
+    send-timeout-seconds: ${OUTBOX_SEND_TIMEOUT_SECONDS:15}
+    # 0表示临时投递故障无限重试；非法Payload等不可重试错误仍会进入DEAD。
+    max-retries: ${OUTBOX_MAX_RETRIES:0}
+    base-backoff-seconds: ${OUTBOX_BASE_BACKOFF_SECONDS:5}
+    max-backoff-seconds: ${OUTBOX_MAX_BACKOFF_SECONDS:300}
 
 jwt:
   secret-key: ${JWT_SECRET_KEY}
@@ -84,6 +99,7 @@ deepseek:
     url: ${DEEPSEEK_API_URL}
     model: ${DEEPSEEK_API_MODEL:deepseek-chat}
     key: ${DEEPSEEK_API_KEY}
+    thinking-enabled: ${DEEPSEEK_THINKING_ENABLED:false}
 
 embedding:
   api:
@@ -92,6 +108,11 @@ embedding:
     model: ${EMBEDDING_API_MODEL:text-embedding-v4}
     batch-size: ${EMBEDDING_BATCH_SIZE:10}
     dimension: ${EMBEDDING_DIMENSION:2048}
+    connect-timeout-ms: ${EMBEDDING_CONNECT_TIMEOUT_MS:10000}
+    response-timeout-seconds: ${EMBEDDING_RESPONSE_TIMEOUT_SECONDS:30}
+    operation-timeout-seconds: ${EMBEDDING_OPERATION_TIMEOUT_SECONDS:150}
+    pool-max-idle-seconds: ${EMBEDDING_POOL_MAX_IDLE_SECONDS:15}
+    pool-max-life-seconds: ${EMBEDDING_POOL_MAX_LIFE_SECONDS:300}
 
 # 百炼 qwen3-rerank 使用原生 DashScope 接口；默认关闭，不影响现有检索。
 rerank:
@@ -145,6 +166,8 @@ ai:
       4. 每个基于资料的关键事实、数字、规则或结论，须在对应句末标注一个或多个真实编号，例如【来源#1】或【来源#1】【来源#3】；只能使用已提供的编号。
       5. 若资料不足以支持回答，明确说明“知识库中未找到足够依据”，并说明缺少什么信息；不得编造引用。
       6. 若多个来源存在冲突，分别说明其内容和适用范围，不擅自选择或调和为单一事实。
+      7. 历史对话只用于理解用户意图和指代关系，不属于本轮事实来源；历史回答中的来源编号均已失效。
+      8. 当前回答只能引用本轮 <knowledge_sources> 中提供的来源编号。
     ref-start: "<knowledge_sources>"
     ref-end: "</knowledge_sources>"
     no-result-text: "（本轮无检索结果）"
@@ -152,3 +175,11 @@ ai:
     temperature: ${AI_TEMPERATURE:0.3}
     max-tokens: ${AI_MAX_TOKENS:2000}
     top-p: ${AI_TOP_P:0.9}
+  history:
+    max-tokens: ${AI_HISTORY_MAX_TOKENS:2500}
+    max-stored-messages: ${AI_HISTORY_MAX_STORED_MESSAGES:100}
+  query-rewrite:
+    enabled: ${AI_QUERY_REWRITE_ENABLED:true}
+    recent-turns: ${AI_QUERY_REWRITE_RECENT_TURNS:3}
+    max-tokens: ${AI_QUERY_REWRITE_MAX_TOKENS:128}
+    timeout-seconds: ${AI_QUERY_REWRITE_TIMEOUT_SECONDS:5}

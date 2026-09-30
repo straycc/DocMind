@@ -1,15 +1,11 @@
 package com.yizhaoqi.smartpai.controller;
 
-import com.yizhaoqi.smartpai.config.KafkaConfig;
 import com.yizhaoqi.smartpai.dto.MultipartUploadDtos.CompleteResponse;
 import com.yizhaoqi.smartpai.dto.MultipartUploadDtos.InitRequest;
-import com.yizhaoqi.smartpai.model.FileProcessingTask;
-import com.yizhaoqi.smartpai.model.FileUpload;
 import com.yizhaoqi.smartpai.service.MultipartUploadService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -27,15 +23,9 @@ import java.util.NoSuchElementException;
 @RequestMapping("/api/v1/upload/multipart")
 public class MultipartUploadController {
     private final MultipartUploadService multipartUploadService;
-    private final KafkaTemplate<String, Object> kafkaTemplate;
-    private final KafkaConfig kafkaConfig;
 
-    public MultipartUploadController(MultipartUploadService multipartUploadService,
-                                     KafkaTemplate<String, Object> kafkaTemplate,
-                                     KafkaConfig kafkaConfig) {
+    public MultipartUploadController(MultipartUploadService multipartUploadService) {
         this.multipartUploadService = multipartUploadService;
-        this.kafkaTemplate = kafkaTemplate;
-        this.kafkaConfig = kafkaConfig;
     }
 
     @PostMapping("/init")
@@ -63,17 +53,7 @@ public class MultipartUploadController {
                                                         @RequestAttribute("userId") String userId) {
         try {
             CompleteResponse result = multipartUploadService.complete(fileUploadId, userId);
-            FileUpload upload = multipartUploadService.ownedUpload(fileUploadId, userId);
-            if (upload.getProcessingStatus() == com.yizhaoqi.smartpai.model.DocumentProcessingStatus.UPLOADED) {
-                FileProcessingTask task = new FileProcessingTask(
-                        upload.getId(), upload.getObjectKey(), upload.getFileMd5(), upload.getFileName(),
-                        upload.getUserId(), upload.getOrgTag(), upload.isPublic());
-                kafkaTemplate.executeInTransaction(operations -> {
-                    operations.send(kafkaConfig.getFileProcessingTopic(), task);
-                    return true;
-                });
-            }
-            return ResponseEntity.ok(envelope(200, "文件上传完成，已提交处理任务", result));
+            return ResponseEntity.ok(envelope(200, "文件上传完成，处理任务已进入可靠投递队列", result));
         } catch (Exception e) {
             return error(e);
         }

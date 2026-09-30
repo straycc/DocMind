@@ -5,7 +5,9 @@ import com.yizhaoqi.smartpai.exception.NonRetryableFileProcessingException;
 import com.yizhaoqi.smartpai.model.DocumentProcessingStatus;
 import com.yizhaoqi.smartpai.model.FileProcessingTask;
 import com.yizhaoqi.smartpai.model.FileUpload;
+import com.yizhaoqi.smartpai.repository.DocumentChunkRepository;
 import com.yizhaoqi.smartpai.repository.FileUploadRepository;
+import com.yizhaoqi.smartpai.service.DocumentProcessingStatusService;
 import com.yizhaoqi.smartpai.service.ParseService;
 import com.yizhaoqi.smartpai.service.VectorizationService;
 import io.minio.GetObjectArgs;
@@ -27,15 +29,20 @@ public class FileProcessingConsumer {
     private final ParseService parseService;
     private final VectorizationService vectorizationService;
     private final FileUploadRepository fileUploadRepository;
+    private final DocumentChunkRepository chunkRepository;
+    private final DocumentProcessingStatusService statusService;
     private final MinioClient minioClient;
     private final String bucketName;
 
     public FileProcessingConsumer(ParseService parseService, VectorizationService vectorizationService,
-                                 FileUploadRepository fileUploadRepository, MinioClient minioClient,
+                                 FileUploadRepository fileUploadRepository, DocumentChunkRepository chunkRepository,
+                                 DocumentProcessingStatusService statusService, MinioClient minioClient,
                                  @Value("${minio.bucketName:uploads}") String bucketName) {
         this.parseService = parseService;
         this.vectorizationService = vectorizationService;
         this.fileUploadRepository = fileUploadRepository;
+        this.chunkRepository = chunkRepository;
+        this.statusService = statusService;
         this.minioClient = minioClient;
         this.bucketName = bucketName;
     }
@@ -50,30 +57,58 @@ public class FileProcessingConsumer {
         }
         FileUpload upload = fileUploadRepository.findById(fileUploadId)
                 .orElseThrow(() -> new NonRetryableFileProcessingException("文件上传记录不存在: " + fileUploadId));
+        if (upload.getProcessingStatus() == DocumentProcessingStatus.READY) {
+            log.info("文档已就绪，忽略重复消息: fileUploadId={}", fileUploadId);
+            return;
+        }
+        if (upload.getProcessingStatus() == DocumentProcessingStatus.NEEDS_OCR) {
+            log.info("文档待 OCR，忽略重复消息: fileUploadId={}", fileUploadId);
+            return;
+        }
         String objectKey = task.getObjectKey() == null || task.getObjectKey().isBlank()
                 ? upload.getObjectKey() : task.getObjectKey();
         if (objectKey == null || objectKey.isBlank()) {
-            markFailed(upload, "Kafka 任务缺少 objectKey");
+            statusService.markFailed(fileUploadId, "Kafka 任务缺少 objectKey");
             throw new NonRetryableFileProcessingException("Kafka 任务缺少 objectKey");
         }
-        try (GetObjectResponse object = minioClient.getObject(GetObjectArgs.builder()
-                .bucket(bucketName).object(objectKey).build())) {
-            DocumentProcessingStatus status = parseService.parseAndSave(fileUploadId, object);
-            if (status == DocumentProcessingStatus.NEEDS_OCR) {
-                log.info("扫描件待 OCR，跳过向量化: fileUploadId={}", fileUploadId);
-                return;
+
+        try {
+            if (canReuseChunks(upload)) {
+                log.info("复用已落库切片，从向量化阶段继续: fileUploadId={}, status={}",
+                        fileUploadId, upload.getProcessingStatus());
+            } else {
+                try (GetObjectResponse object = minioClient.getObject(GetObjectArgs.builder()
+                        .bucket(bucketName).object(objectKey).build())) {
+                    DocumentProcessingStatus status = parseService.parseAndSave(fileUploadId, object);
+                    if (status == DocumentProcessingStatus.NEEDS_OCR) {
+                        log.info("扫描件待 OCR，跳过向量化: fileUploadId={}", fileUploadId);
+                        return;
+                    }
+                }
             }
             vectorizationService.vectorize(fileUploadId);
             log.info("文件处理完成: fileUploadId={}, objectKey={}", fileUploadId, objectKey);
         } catch (Exception exception) {
-            markFailed(upload, exception.getMessage());
             log.error("文件处理失败: fileUploadId={}, objectKey={}", fileUploadId, objectKey, exception);
             if (isNonRetryable(exception)) {
+                statusService.markFailed(fileUploadId, exception);
                 throw new NonRetryableFileProcessingException("文件处理不可重试: " + fileUploadId, exception);
             }
+            statusService.markRetrying(fileUploadId, exception);
             // 短暂异常交由 Kafka 指数退避重试；新表和 ES 的确定性记录保证重试不重复。
             throw new IllegalStateException("文件处理失败: " + fileUploadId, exception);
         }
+    }
+
+    private boolean canReuseChunks(FileUpload upload) {
+        DocumentProcessingStatus status = upload.getProcessingStatus();
+        boolean resumableStatus = status == DocumentProcessingStatus.CHUNKED
+                || status == DocumentProcessingStatus.EMBEDDING
+                || status == DocumentProcessingStatus.RETRYING
+                || status == DocumentProcessingStatus.FAILED;
+        return resumableStatus
+                && ParseService.CHUNKER_VERSION.equals(upload.getChunkerVersion())
+                && chunkRepository.existsByFileUploadId(upload.getId());
     }
 
     /** 将明确的数据、对象或鉴权错误直接送入 DLT，避免无意义的重复调用。 */
@@ -110,11 +145,5 @@ public class FileProcessingConsumer {
         return fileUploadRepository.findByFileMd5(task.getFileMd5())
                 .map(FileUpload::getId)
                 .orElseThrow(() -> new IllegalArgumentException("文件上传记录不存在: " + task.getFileMd5()));
-    }
-
-    private void markFailed(FileUpload upload, String error) {
-        upload.setProcessingStatus(DocumentProcessingStatus.FAILED);
-        upload.setProcessingError(error == null ? "未知处理错误" : error.substring(0, Math.min(4000, error.length())));
-        fileUploadRepository.save(upload);
     }
 }

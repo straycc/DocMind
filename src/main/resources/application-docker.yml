@@ -43,6 +43,8 @@ spring:
       properties:
         spring.json.trusted.packages: "*" # 允许反序列化的包
         client.dns.lookup: use_all_dns_ips
+    listener:
+      concurrency: 3
     topic:
       file-processing: file-processing-topic1 # 新增的 Topic 配置
       dlt: file-processing-dlt # 死信队列主题
@@ -62,6 +64,17 @@ minio:
 upload:
   multipart:
     presign-expiry-minutes: 15
+outbox:
+  dispatcher:
+    enabled: true
+    fixed-delay-ms: 5000
+    initial-delay-ms: 5000
+    batch-size: 20
+    lease-seconds: 60
+    send-timeout-seconds: 15
+    max-retries: 0
+    base-backoff-seconds: 5
+    max-backoff-seconds: 300
 jwt:
   secret-key: "PXrQbuCwXwOZzkML/Vm2S5rSwt1iybvmKtGDzVEu+Hc="
 
@@ -105,6 +118,7 @@ deepseek:
     url: https://api.deepseek.com/v1  # 本地是 http://localhost:11434/v1 官方：https://api.deepseek.com/v1
     model: deepseek-chat  # 本地: deepseek-r1:7b, 官方: deepseek-chat
     key:  # DeepSeek API Key 如果是本地就为空
+    thinking-enabled: false
 
 embedding:
   api:
@@ -113,6 +127,11 @@ embedding:
     model: text-embedding-v4
     batch-size: 10  # 单次请求最大行数（DashScope限制为10）
     dimension: 2048  # 指定向量维度
+    connect-timeout-ms: 10000
+    response-timeout-seconds: 30
+    operation-timeout-seconds: 150
+    pool-max-idle-seconds: 15
+    pool-max-life-seconds: 300
 
 ai:
   prompt:
@@ -124,6 +143,8 @@ ai:
       4. 每个基于资料的关键事实、数字、规则或结论，须在对应句末标注一个或多个真实编号，例如【来源#1】或【来源#1】【来源#3】；只能使用已提供的编号。
       5. 若资料不足以支持回答，明确说明“知识库中未找到足够依据”，并说明缺少什么信息；不得编造引用。
       6. 若多个来源存在冲突，分别说明其内容和适用范围，不擅自选择或调和为单一事实。
+      7. 历史对话只用于理解用户意图和指代关系，不属于本轮事实来源；历史回答中的来源编号均已失效。
+      8. 当前回答只能引用本轮 <knowledge_sources> 中提供的来源编号。
     ref-start: "<knowledge_sources>"
     ref-end: "</knowledge_sources>"
     no-result-text: "（本轮无检索结果）"
@@ -131,3 +152,11 @@ ai:
     temperature: 0.3
     max-tokens: 2000
     top-p: 0.9
+  history:
+    max-tokens: ${AI_HISTORY_MAX_TOKENS:2500}
+    max-stored-messages: ${AI_HISTORY_MAX_STORED_MESSAGES:100}
+  query-rewrite:
+    enabled: ${AI_QUERY_REWRITE_ENABLED:true}
+    recent-turns: ${AI_QUERY_REWRITE_RECENT_TURNS:3}
+    max-tokens: ${AI_QUERY_REWRITE_MAX_TOKENS:128}
+    timeout-seconds: ${AI_QUERY_REWRITE_TIMEOUT_SECONDS:5}

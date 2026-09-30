@@ -15,10 +15,13 @@ import org.apache.kafka.common.TopicPartition;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.kafka.listener.ConsumerRecordRecoverer;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.support.ExponentialBackOffWithMaxRetries;
 import com.yizhaoqi.smartpai.exception.NonRetryableFileProcessingException;
+import com.yizhaoqi.smartpai.service.FileProcessingRecoveryService;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -44,6 +47,9 @@ public class KafkaConfig {
 
     @Value("${spring.kafka.consumer.properties.spring.json.trusted.packages}")
     private String trustedPackages;
+
+    @Value("${spring.kafka.listener.concurrency:3}")
+    private int listenerConcurrency;
 
 
     @Bean
@@ -91,11 +97,19 @@ public class KafkaConfig {
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, Object> kafkaListenerContainerFactory(
             ConsumerFactory<String, Object> consumerFactory,
-            KafkaTemplate<String, Object> kafkaTemplate) {
+            KafkaTemplate<String, Object> kafkaTemplate,
+            FileProcessingRecoveryService recoveryService) {
         // 当重试失败后，消息发送至 file-processing-dlt 主题，分区与原消息保持一致
-        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
+        DeadLetterPublishingRecoverer dltRecoverer = new DeadLetterPublishingRecoverer(
                 kafkaTemplate,
                 (record, ex) -> new TopicPartition(fileProcessingDltTopic, record.partition()));
+        dltRecoverer.setFailIfSendResultIsError(true);
+        dltRecoverer.setWaitForSendResultTimeout(Duration.ofSeconds(10));
+        ConsumerRecordRecoverer recoverer = (record, exception) -> {
+            // 先确认DLT写入成功，再将RETRYING转为最终FAILED。
+            dltRecoverer.accept(record, exception);
+            recoveryService.markFailedAfterDlt(record.value(), exception);
+        };
 
         // 短暂故障按 1、2、4、8 秒退避；4 次重试均失败后进入 DLT。
         ExponentialBackOffWithMaxRetries backOff = new ExponentialBackOffWithMaxRetries(4);
@@ -108,6 +122,8 @@ public class KafkaConfig {
         ConcurrentKafkaListenerContainerFactory<String, Object> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.setCommonErrorHandler(errorHandler);
+        // 有效并发不会超过 Topic 的分区数；单 Broker 多分区也可以并行消费。
+        factory.setConcurrency(listenerConcurrency);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
         return factory;
     }

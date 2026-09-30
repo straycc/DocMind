@@ -1,6 +1,6 @@
 <script setup lang="ts">
 const chatStore = useChatStore();
-const { input, list, wsStatus, wsData } = storeToRefs(chatStore);
+const { input, list, wsStatus, wsData, conversationId, activeTurnId } = storeToRefs(chatStore);
 
 const latestMessage = computed(() => {
   return list.value[list.value.length - 1] ?? {};
@@ -22,13 +22,30 @@ watch(wsData, val => {
   const assistant = list.value[list.value.length - 1];
   if (!assistant || assistant.role !== 'assistant') return;
 
+  if (data.type === 'start') {
+    activeTurnId.value = data.turnId || '';
+    conversationId.value = data.conversationId || conversationId.value;
+    assistant.turnId = data.turnId;
+    return;
+  }
+
+  // 已经开始新一轮时，忽略上一轮迟到的 chunk/completion。
+  if (data.turnId && assistant.turnId && data.turnId !== assistant.turnId) return;
+
   if (data.type === 'completion' && data.status === 'finished' && assistant.status !== 'error') {
     assistant.status = 'finished';
     assistant.sources = data.sources || [];
     assistant.citationValidation = data.citationValidation;
+    assistant.queryRewritten = Boolean(data.queryRewritten);
+    activeTurnId.value = '';
   }
-  if (data.error || (data.type === 'completion' && data.status === 'failed')) assistant.status = 'error';
-  else if (data.chunk) {
+  if (data.type === 'stop') {
+    assistant.status = 'finished';
+    activeTurnId.value = '';
+  } else if (data.error || (data.type === 'completion' && data.status === 'failed')) {
+    assistant.status = 'error';
+    activeTurnId.value = '';
+  } else if (data.chunk) {
     assistant.status = 'loading';
     assistant.content += data.chunk;
   }
@@ -40,7 +57,10 @@ const handleSend = async () => {
     const { error, data } = await request<Api.Chat.Token>({ url: 'chat/websocket-token', baseURL: 'proxy-api' });
     if (error) return;
 
-    chatStore.wsSend(JSON.stringify({ type: 'stop', _internal_cmd_token: data.cmdToken }));
+    chatStore.wsSend(
+      JSON.stringify({ type: 'stop', turnId: activeTurnId.value || undefined, _internal_cmd_token: data.cmdToken })
+    );
+    activeTurnId.value = '';
 
     list.value[list.value.length - 1].status = 'finished';
     if (!latestMessage.value.content) list.value.pop();
@@ -51,12 +71,13 @@ const handleSend = async () => {
     content: input.value.message,
     role: 'user'
   });
-  chatStore.wsSend(input.value.message);
   list.value.push({
     content: '',
     role: 'assistant',
     status: 'pending'
   });
+  activeTurnId.value = '';
+  chatStore.wsSend(input.value.message);
   input.value.message = '';
 };
 

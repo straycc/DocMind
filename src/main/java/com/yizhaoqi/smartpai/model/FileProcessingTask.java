@@ -10,6 +10,7 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 public class FileProcessingTask {
+    private String eventId; // Outbox/Kafka 事件唯一标识，兼容旧消息时可为空
     private Long fileUploadId; // 文件事实记录 ID
     private String objectKey;  // MinIO 对象键，不是预签名 URL
     private String fileMd5; // 文件的 MD5 校验值

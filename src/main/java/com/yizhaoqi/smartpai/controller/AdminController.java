@@ -507,8 +507,8 @@ public class AdminController {
      * 处理Redis中的对话数据
      */
     private void processRedisConversation(String json, List<Map<String, Object>> targetList, String username, String startDate, String endDate) throws JsonProcessingException {
-        List<Map<String, String>> history = objectMapper.readValue(json, 
-                new TypeReference<List<Map<String, String>>>() {});
+        List<Map<String, Object>> history = objectMapper.readValue(json,
+                new TypeReference<List<Map<String, Object>>>() {});
         
         // 解析时间范围
         java.time.LocalDateTime startDateTime = null;
@@ -531,8 +531,8 @@ public class AdminController {
         }
         
         // 将对话转换为前端需要的格式，使用存储的时间戳并添加用户名
-        for (Map<String, String> message : history) {
-            String messageTimestamp = message.getOrDefault("timestamp", "未知时间");
+        for (Map<String, Object> message : history) {
+            String messageTimestamp = String.valueOf(message.getOrDefault("timestamp", "未知时间"));
             
             // 时间过滤
             if (startDateTime != null || endDateTime != null) {
@@ -564,6 +564,7 @@ public class AdminController {
             messageWithMetadata.put("content", message.get("content"));
             messageWithMetadata.put("timestamp", messageTimestamp);
             messageWithMetadata.put("username", username);
+            messageWithMetadata.put("sources", message.getOrDefault("sources", List.of()));
             targetList.add(messageWithMetadata);
         }
     }
@@ -641,4 +642,4 @@ record OrgTagRequest(String tagId, String name, String description, String paren
 record AssignOrgTagsRequest(List<String> orgTags) {}
 
 // 添加组织标签更新请求记录类
-record OrgTagUpdateRequest(String name, String description, String parentTag) {} 
+record OrgTagUpdateRequest(String name, String description, String parentTag) {}

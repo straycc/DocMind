@@ -3,14 +3,12 @@ package com.yizhaoqi.smartpai.service;
 import com.yizhaoqi.smartpai.client.EmbeddingClient;
 import com.yizhaoqi.smartpai.entity.EsDocument;
 import com.yizhaoqi.smartpai.model.DocumentChunk;
-import com.yizhaoqi.smartpai.model.DocumentProcessingStatus;
 import com.yizhaoqi.smartpai.model.FileUpload;
 import com.yizhaoqi.smartpai.repository.DocumentChunkRepository;
 import com.yizhaoqi.smartpai.repository.FileUploadRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.stream.IntStream;
@@ -24,30 +22,28 @@ public class VectorizationService {
     private final ElasticsearchService elasticsearchService;
     private final DocumentChunkRepository chunkRepository;
     private final FileUploadRepository fileUploadRepository;
+    private final DocumentProcessingStatusService statusService;
 
     public VectorizationService(EmbeddingClient embeddingClient, ElasticsearchService elasticsearchService,
-                                DocumentChunkRepository chunkRepository, FileUploadRepository fileUploadRepository) {
+                                DocumentChunkRepository chunkRepository, FileUploadRepository fileUploadRepository,
+                                DocumentProcessingStatusService statusService) {
         this.embeddingClient = embeddingClient;
         this.elasticsearchService = elasticsearchService;
         this.chunkRepository = chunkRepository;
         this.fileUploadRepository = fileUploadRepository;
+        this.statusService = statusService;
     }
 
-    @Transactional(noRollbackFor = IllegalStateException.class)
     public void vectorize(Long fileUploadId) {
         FileUpload upload = fileUploadRepository.findById(fileUploadId)
                 .orElseThrow(() -> new IllegalArgumentException("文件上传记录不存在: " + fileUploadId));
         List<DocumentChunk> chunks = chunkRepository.findByFileUploadIdOrderByOrdinalAsc(fileUploadId);
         if (chunks.isEmpty()) {
-            upload.setProcessingStatus(DocumentProcessingStatus.FAILED);
-            upload.setProcessingError("没有可向量化的文档子块");
-            fileUploadRepository.save(upload);
             throw new IllegalStateException("没有可向量化的文档子块");
         }
         try {
-            upload.setProcessingStatus(DocumentProcessingStatus.EMBEDDING);
-            upload.setProcessingError(null);
-            fileUploadRepository.save(upload);
+            // 外部 Embedding/ES 调用不持有数据库事务；状态切换各自使用独立短事务。
+            statusService.markEmbedding(fileUploadId);
             List<float[]> vectors = embeddingClient.embed(chunks.stream()
                     .map(chunk -> DocumentEmbeddingTextBuilder.build(upload.getFileName(), chunk.getTitlePath(),
                             chunk.getTextContent()))
@@ -65,15 +61,9 @@ public class VectorizationService {
                         upload.getOrgTag(), upload.isPublic());
             }).toList();
             elasticsearchService.bulkIndex(documents);
-            upload.setEmbeddingVersion(embeddingClient.getModelId());
-            upload.setProcessingStatus(DocumentProcessingStatus.READY);
-            upload.setProcessingError(null);
-            fileUploadRepository.save(upload);
+            statusService.markReady(fileUploadId, embeddingClient.getModelId());
             logger.info("文件向量化完成: fileUploadId={}, chunks={}", fileUploadId, chunks.size());
         } catch (Exception exception) {
-            upload.setProcessingStatus(DocumentProcessingStatus.FAILED);
-            upload.setProcessingError(limitError(exception));
-            fileUploadRepository.save(upload);
             throw new IllegalStateException("文档向量化失败: " + fileUploadId, exception);
         }
     }
@@ -96,10 +86,5 @@ public class VectorizationService {
                         + "，实际=" + (vector == null ? 0 : vector.length));
             }
         }
-    }
-
-    private String limitError(Exception exception) {
-        String text = exception.getClass().getSimpleName() + ": " + exception.getMessage();
-        return text.length() > 4000 ? text.substring(0, 4000) : text;
     }
 }

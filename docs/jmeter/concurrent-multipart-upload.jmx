@@ -1,0 +1,324 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="DocMind - Concurrent Multipart Upload" enabled="true">
+      <stringProp name="TestPlan.comments">Each thread uploads one distinct file through Spring Boot init/presign/complete and MinIO presigned PUT URLs.</stringProp>
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="Variables" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="base_url" elementType="Argument">
+            <stringProp name="Argument.name">base_url</stringProp>
+            <stringProp name="Argument.value">${__P(base_url,http://localhost:8081)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="username" elementType="Argument">
+            <stringProp name="Argument.name">username</stringProp>
+            <stringProp name="Argument.value">${__P(username,test)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="password" elementType="Argument">
+            <stringProp name="Argument.name">password</stringProp>
+            <stringProp name="Argument.value">${__P(password,test)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="part_size" elementType="Argument">
+            <stringProp name="Argument.name">part_size</stringProp>
+            <stringProp name="Argument.value">${__P(part_size,16777216)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="content_type" elementType="Argument">
+            <stringProp name="Argument.name">content_type</stringProp>
+            <stringProp name="Argument.value">${__P(content_type,application/pdf)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="org_tag" elementType="Argument">
+            <stringProp name="Argument.name">org_tag</stringProp>
+            <stringProp name="Argument.value">${__P(org_tag,)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="is_public" elementType="Argument">
+            <stringProp name="Argument.name">is_public</stringProp>
+            <stringProp name="Argument.value">${__P(is_public,false)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Concurrent file uploads" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">stopthread</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Loop Controller" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">${__P(threads,6)}</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">${__P(ramp_seconds,1)}</stringProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <stringProp name="ThreadGroup.duration"></stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
+      </ThreadGroup>
+      <hashTree>
+        <CSVDataSet guiclass="TestBeanGUI" testclass="CSVDataSet" testname="One distinct file per thread" enabled="true">
+          <stringProp name="filename">${__P(csv_file,D:/jmeter-data/upload-files.csv)}</stringProp>
+          <stringProp name="fileEncoding">UTF-8</stringProp>
+          <stringProp name="variableNames">file_path</stringProp>
+          <boolProp name="ignoreFirstLine">false</boolProp>
+          <stringProp name="delimiter">,</stringProp>
+          <boolProp name="quotedData">true</boolProp>
+          <boolProp name="recycle">false</boolProp>
+          <boolProp name="stopThread">true</boolProp>
+          <stringProp name="shareMode">shareMode.all</stringProp>
+        </CSVDataSet>
+        <hashTree/>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="00-login" enabled="true">
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="Arguments" enabled="true">
+            <collectionProp name="Arguments.arguments">
+              <elementProp name="" elementType="HTTPArgument">
+                <boolProp name="HTTPArgument.always_encode">false</boolProp>
+                <stringProp name="Argument.value">{&quot;username&quot;:&quot;${username}&quot;,&quot;password&quot;:&quot;${password}&quot;}</stringProp>
+                <stringProp name="Argument.metadata">=</stringProp>
+              </elementProp>
+            </collectionProp>
+          </elementProp>
+          <stringProp name="HTTPSampler.path">${base_url}/api/v1/users/login</stringProp>
+          <stringProp name="HTTPSampler.method">POST</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+          <stringProp name="HTTPSampler.connect_timeout">10000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">30000</stringProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="Login JSON header" enabled="true">
+            <collectionProp name="HeaderManager.headers">
+              <elementProp name="" elementType="Header">
+                <stringProp name="Header.name">Content-Type</stringProp>
+                <stringProp name="Header.value">application/json</stringProp>
+              </elementProp>
+            </collectionProp>
+          </HeaderManager>
+          <hashTree/>
+          <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="Extract JWT" enabled="true">
+            <stringProp name="JSONPostProcessor.referenceNames">jwt_token</stringProp>
+            <stringProp name="JSONPostProcessor.jsonPathExprs">$.data.token</stringProp>
+            <stringProp name="JSONPostProcessor.match_numbers">1</stringProp>
+            <stringProp name="JSONPostProcessor.defaultValues">TOKEN_NOT_FOUND</stringProp>
+          </JSONPostProcessor>
+          <hashTree/>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Login must return HTTP 200" enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="49586">200</stringProp>
+            </collectionProp>
+            <stringProp name="Assertion.custom_message">Login failed; check username and password.</stringProp>
+            <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
+            <intProp name="Assertion.test_type">8</intProp>
+          </ResponseAssertion>
+          <hashTree/>
+        </hashTree>
+        <TransactionController guiclass="TransactionControllerGui" testclass="TransactionController" testname="Upload one complete file" enabled="true">
+          <boolProp name="TransactionController.includeTimers">false</boolProp>
+          <boolProp name="TransactionController.parent">true</boolProp>
+        </TransactionController>
+        <hashTree>
+          <SyncTimer guiclass="TestBeanGUI" testclass="SyncTimer" testname="Start uploads together" enabled="true">
+            <stringProp name="groupSize">${__P(threads,6)}</stringProp>
+            <stringProp name="timeoutInMs">30000</stringProp>
+          </SyncTimer>
+          <hashTree/>
+          <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="Multipart upload via presigned URLs" enabled="true">
+            <stringProp name="cacheKey">true</stringProp>
+            <stringProp name="filename"></stringProp>
+            <stringProp name="parameters"></stringProp>
+            <stringProp name="scriptLanguage">groovy</stringProp>
+            <stringProp name="script"><![CDATA[
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.nio.file.Files
+import java.security.MessageDigest
+import java.time.Duration
+
+def file = new File(vars.get('file_path'))
+if (!file.isFile()) {
+    SampleResult.setSuccessful(false)
+    SampleResult.setResponseCode('400')
+    SampleResult.setResponseMessage('File does not exist: ' + file.absolutePath)
+    return
+}
+
+def token = vars.get('jwt_token')
+if (!token || token == 'TOKEN_NOT_FOUND') {
+    SampleResult.setSuccessful(false)
+    SampleResult.setResponseCode('401')
+    SampleResult.setResponseMessage('JWT token was not extracted from login response')
+    return
+}
+
+def baseUrl = vars.get('base_url').replaceAll('/+$', '')
+def client = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(10))
+        .followRedirects(HttpClient.Redirect.NORMAL)
+        .build()
+def json = new JsonSlurper()
+
+def md5 = MessageDigest.getInstance('MD5')
+file.withInputStream { input ->
+    byte[] buffer = new byte[1024 * 1024]
+    int count
+    while ((count = input.read(buffer)) != -1) {
+        md5.update(buffer, 0, count)
+    }
+}
+def fileMd5 = md5.digest().encodeHex().toString()
+
+def sendJson = { String method, String url, Object body ->
+    def builder = HttpRequest.newBuilder(URI.create(url))
+            .timeout(Duration.ofSeconds(60))
+            .header('Authorization', 'Bearer ' + token)
+            .header('Content-Type', 'application/json')
+    def payload = body == null ? '' : JsonOutput.toJson(body)
+    if (method == 'POST') {
+        builder.POST(HttpRequest.BodyPublishers.ofString(payload))
+    } else {
+        throw new IllegalArgumentException('Unsupported method: ' + method)
+    }
+    def response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+    if (response.statusCode() < 200 || response.statusCode() >= 300) {
+        throw new IllegalStateException(method + ' ' + url + ' returned HTTP '
+                + response.statusCode() + ': ' + response.body())
+    }
+    def parsed = json.parseText(response.body())
+    if ((parsed.code as int) != 200) {
+        throw new IllegalStateException(method + ' ' + url + ' failed: ' + response.body())
+    }
+    parsed
+}
+
+try {
+    def requestedPartSize = Long.parseLong(vars.get('part_size'))
+    def tag = vars.get('org_tag')
+    def initBody = [
+            fileName   : file.name,
+            totalSize  : file.length(),
+            fileMd5    : fileMd5,
+            contentType: vars.get('content_type'),
+            partSize   : requestedPartSize,
+            orgTag     : tag == null || tag.isBlank() ? null : tag,
+            isPublic   : Boolean.parseBoolean(vars.get('is_public'))
+    ]
+    def init = sendJson('POST', baseUrl + '/api/v1/upload/multipart/init', initBody)
+    def upload = init.data
+    if (upload.status != 'UPLOADING') {
+        throw new IllegalStateException('Expected a new UPLOADING task but got ' + upload.status
+                + '. Use distinct file content/MD5 for every test run.')
+    }
+
+    long fileUploadId = upload.fileUploadId as long
+    long actualPartSize = upload.partSize as long
+    int totalParts = upload.totalParts as int
+    vars.put('file_upload_id', String.valueOf(fileUploadId))
+    vars.put('file_md5', fileMd5)
+
+    def randomAccessFile = new RandomAccessFile(file, 'r')
+    try {
+        for (int partNumber = 1; partNumber <= totalParts; partNumber++) {
+            def presign = sendJson('POST', baseUrl + '/api/v1/upload/multipart/'
+                    + fileUploadId + '/parts/' + partNumber + '/presign', null)
+            String presignedUrl = presign.data.url as String
+
+            long offset = (partNumber - 1L) * actualPartSize
+            int length = (int) Math.min(actualPartSize, file.length() - offset)
+            byte[] bytes = new byte[length]
+            randomAccessFile.seek(offset)
+            randomAccessFile.readFully(bytes)
+
+            def putRequest = HttpRequest.newBuilder(URI.create(presignedUrl))
+                    .timeout(Duration.ofMinutes(5))
+                    .header('Content-Type', 'application/octet-stream')
+                    .PUT(HttpRequest.BodyPublishers.ofByteArray(bytes))
+                    .build()
+            def putResponse = client.send(putRequest, HttpResponse.BodyHandlers.discarding())
+            if (putResponse.statusCode() < 200 || putResponse.statusCode() >= 300) {
+                throw new IllegalStateException('MinIO PUT part ' + partNumber
+                        + ' returned HTTP ' + putResponse.statusCode())
+            }
+        }
+    } finally {
+        randomAccessFile.close()
+    }
+
+    def completed = sendJson('POST', baseUrl + '/api/v1/upload/multipart/'
+            + fileUploadId + '/complete', null)
+    SampleResult.setSuccessful(true)
+    SampleResult.setResponseCode('200')
+    SampleResult.setResponseMessage('Uploaded ' + file.name + ' as fileUploadId=' + fileUploadId)
+    SampleResult.setResponseData(JsonOutput.prettyPrint(JsonOutput.toJson(completed)), 'UTF-8')
+    SampleResult.setDataType(org.apache.jmeter.samplers.SampleResult.TEXT)
+    SampleResult.setBytes(file.length())
+} catch (Exception error) {
+    SampleResult.setSuccessful(false)
+    SampleResult.setResponseCode('500')
+    SampleResult.setResponseMessage(error.class.simpleName + ': ' + error.message)
+    SampleResult.setResponseData(org.apache.commons.lang3.exception.ExceptionUtils.getStackTrace(error), 'UTF-8')
+}
+]]></stringProp>
+          </JSR223Sampler>
+          <hashTree/>
+        </hashTree>
+        <ResultCollector guiclass="SummaryReport" testclass="ResultCollector" testname="Summary Report" enabled="true">
+          <boolProp name="ResultCollector.error_logging">false</boolProp>
+          <objProp>
+            <name>saveConfig</name>
+            <value class="SampleSaveConfiguration">
+              <time>true</time>
+              <latency>true</latency>
+              <timestamp>true</timestamp>
+              <success>true</success>
+              <label>true</label>
+              <code>true</code>
+              <message>true</message>
+              <threadName>true</threadName>
+              <dataType>true</dataType>
+              <encoding>false</encoding>
+              <assertions>true</assertions>
+              <subresults>true</subresults>
+              <responseData>false</responseData>
+              <samplerData>false</samplerData>
+              <xml>false</xml>
+              <fieldNames>true</fieldNames>
+              <responseHeaders>false</responseHeaders>
+              <requestHeaders>false</requestHeaders>
+              <responseDataOnError>true</responseDataOnError>
+              <saveAssertionResultsFailureMessage>true</saveAssertionResultsFailureMessage>
+              <assertionsResultsToSave>0</assertionsResultsToSave>
+              <bytes>true</bytes>
+              <sentBytes>true</sentBytes>
+              <url>true</url>
+              <threadCounts>true</threadCounts>
+              <idleTime>true</idleTime>
+              <connectTime>true</connectTime>
+            </value>
+          </objProp>
+          <stringProp name="filename"></stringProp>
+        </ResultCollector>
+        <hashTree/>
+        <ResultCollector guiclass="ViewResultsFullVisualizer" testclass="ResultCollector" testname="View Results Tree (debug only)" enabled="false">
+          <boolProp name="ResultCollector.error_logging">false</boolProp>
+          <objProp>
+            <name>saveConfig</name>
+            <value class="SampleSaveConfiguration"/>
+          </objProp>
+          <stringProp name="filename"></stringProp>
+        </ResultCollector>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

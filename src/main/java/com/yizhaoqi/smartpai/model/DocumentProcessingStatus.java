@@ -9,6 +9,7 @@ public enum DocumentProcessingStatus {
     PARSING,
     CHUNKED,
     EMBEDDING,
+    RETRYING,
     READY,
     NEEDS_OCR,
     FAILED

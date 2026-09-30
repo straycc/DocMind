@@ -16,8 +16,27 @@ function handleCopy(content: string) {
 
 const chatStore = useChatStore();
 
+// citationValidation 是可由回答正文和结构化 sources 推导出的临时结果。
+// WebSocket 实时消息会直接携带；页面刷新加载历史时则在前端重建。
+const citationValidation = computed<Api.Chat.CitationValidation>(() => {
+  if (props.msg.citationValidation) return props.msg.citationValidation;
+
+  const citedSourceIds = Array.from(props.msg.content.matchAll(/【来源#\s*(\d+)】/g), match => Number(match[1])).filter(
+    (sourceId, index, values) => values.indexOf(sourceId) === index
+  );
+  const availableSourceIds = new Set((props.msg.sources || []).map(source => source.sourceId));
+  const invalidCitationIds = citedSourceIds.filter(sourceId => !availableSourceIds.has(sourceId));
+
+  return {
+    citedSourceIds,
+    invalidCitationIds,
+    hasCitation: citedSourceIds.length > 0,
+    allCitationIdsValid: invalidCitationIds.length === 0
+  };
+});
+
 const citedSources = computed(() => {
-  const citedIds = props.msg.citationValidation?.citedSourceIds || [];
+  const citedIds = citationValidation.value.citedSourceIds;
   return (props.msg.sources || []).filter(source => citedIds.includes(source.sourceId));
 });
 
@@ -127,12 +146,8 @@ async function handleSourceFileClick(fileName: string) {
     <NText v-else-if="msg.status === 'error'" class="ml-12 mt-2 italic">服务器繁忙，请稍后再试</NText>
     <div v-else-if="msg.role === 'assistant'" class="mt-2 pl-12" @click="handleContentClick">
       <VueMarkdownIt :content="content" />
-      <NText
-        v-if="msg.citationValidation && !msg.citationValidation.allCitationIdsValid"
-        type="error"
-        class="mt-2 block text-3"
-      >
-        回答中存在未匹配的引用编号：{{ msg.citationValidation.invalidCitationIds.join('、') }}
+      <NText v-if="!citationValidation.allCitationIdsValid" type="error" class="mt-2 block text-3">
+        回答中存在未匹配的引用编号：{{ citationValidation.invalidCitationIds.join('、') }}
       </NText>
       <div v-if="citedSources.length" class="mt-3 flex flex-wrap items-center gap-2 text-3">
         <NText depth="3">引用来源：</NText>

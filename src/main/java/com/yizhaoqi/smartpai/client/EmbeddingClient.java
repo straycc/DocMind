@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.util.retry.Retry;
 
@@ -28,6 +29,9 @@ public class EmbeddingClient {
 
     @Value("${embedding.api.dimension:2048}")
     private int dimension;
+
+    @Value("${embedding.api.operation-timeout-seconds:150}")
+    private long operationTimeoutSeconds;
     
     private static final Logger logger = LoggerFactory.getLogger(EmbeddingClient.class);
     private final WebClient webClient;
@@ -92,11 +96,29 @@ public class EmbeddingClient {
                 .bodyValue(requestBody)
                 .retrieve()
                 .bodyToMono(String.class)
-                // 重试机制
-                .retryWhen(Retry.fixedDelay(3, Duration.ofSeconds(1))
-                        .filter(e -> e instanceof WebClientResponseException))
+                // 在 API 调用层消化连接重置、超时、限流和服务端短暂故障，
+                // 避免把一次网络抖动放大成 Kafka 整份文档重跑。
+                .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
+                        .maxBackoff(Duration.ofSeconds(5))
+                        .jitter(0.2)
+                        .filter(this::isTransientFailure)
+                        .doBeforeRetry(signal -> logger.warn(
+                                "向量API短暂异常，准备第{}次重试: {}",
+                                signal.totalRetries() + 1, signal.failure().getMessage()))
+                        .onRetryExhaustedThrow((spec, signal) -> signal.failure()))
                 // 同步调用
-                .block(Duration.ofSeconds(30));
+                .block(Duration.ofSeconds(operationTimeoutSeconds));
+    }
+
+    boolean isTransientFailure(Throwable error) {
+        if (error instanceof WebClientRequestException) {
+            return true;
+        }
+        if (error instanceof WebClientResponseException responseException) {
+            int status = responseException.getStatusCode().value();
+            return status == 429 || status >= 500;
+        }
+        return false;
     }
 
     private List<float[]> parseVectors(String response) throws Exception {

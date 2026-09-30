@@ -27,6 +27,7 @@ class MultipartUploadServiceTest {
     private MultipartMinioClient minioClient;
     private FileUploadRepository repository;
     private UserService userService;
+    private OutboxEventService outboxEventService;
     private MultipartUploadService service;
 
     @BeforeEach
@@ -34,8 +35,9 @@ class MultipartUploadServiceTest {
         minioClient = Mockito.mock(MultipartMinioClient.class);
         repository = Mockito.mock(FileUploadRepository.class);
         userService = Mockito.mock(UserService.class);
+        outboxEventService = Mockito.mock(OutboxEventService.class);
         service = new MultipartUploadService(minioClient, repository, userService,
-                new FileTypeValidationService(), "uploads", 15);
+                new FileTypeValidationService(), outboxEventService, "uploads", 15);
     }
 
     @Test
@@ -95,6 +97,66 @@ class MultipartUploadServiceTest {
     }
 
     @Test
+    void completingMultipartPersistsUploadedStateAndOutboxEvent() throws Exception {
+        FileUpload upload = uploadingFile();
+        Part first = part(1, 16L * 1024 * 1024);
+        Part second = part(2, 4L * 1024 * 1024);
+        when(repository.findOwnedByIdForUpdate(7L, "u1")).thenReturn(Optional.of(upload));
+        when(minioClient.statSize("uploads", upload.getObjectKey())).thenReturn(0L, upload.getTotalSize());
+        when(minioClient.parts("uploads", upload.getObjectKey(), upload.getMinioUploadId()))
+                .thenReturn(List.of(first, second));
+
+        service.complete(7L, "u1");
+
+        assertEquals(MultipartUploadService.STATUS_COMPLETED, upload.getStatus());
+        assertEquals(DocumentProcessingStatus.UPLOADED, upload.getProcessingStatus());
+        verify(repository).save(upload);
+        verify(outboxEventService).recordDocumentProcessingRequested(upload);
+    }
+
+    @Test
+    void repeatedCompletionRepairsMissingOutboxForUploadedDocument() throws Exception {
+        FileUpload upload = uploadingFile();
+        upload.setStatus(MultipartUploadService.STATUS_COMPLETED);
+        upload.setMinioUploadId(null);
+        when(repository.findOwnedByIdForUpdate(7L, "u1")).thenReturn(Optional.of(upload));
+
+        service.complete(7L, "u1");
+
+        verify(outboxEventService).recordDocumentProcessingRequested(upload);
+        verify(minioClient, never()).finish(any(), any(), any(), any());
+    }
+
+    @Test
+    void recoversCompletedMinioObjectAndCreatesOutboxEvent() throws Exception {
+        FileUpload upload = uploadingFile();
+        when(repository.findOwnedByIdForUpdate(7L, "u1")).thenReturn(Optional.of(upload));
+        when(minioClient.statSize("uploads", upload.getObjectKey())).thenReturn(upload.getTotalSize());
+
+        service.complete(7L, "u1");
+
+        assertEquals(MultipartUploadService.STATUS_COMPLETED, upload.getStatus());
+        assertEquals(DocumentProcessingStatus.UPLOADED, upload.getProcessingStatus());
+        verify(repository).save(upload);
+        verify(outboxEventService).recordDocumentProcessingRequested(upload);
+        verify(minioClient, never()).parts(any(), any(), any());
+        verify(minioClient, never()).finish(any(), any(), any(), any());
+    }
+
+    @Test
+    void repeatedCompletionDoesNotCreateProcessingEventForReadyDocument() throws Exception {
+        FileUpload upload = uploadingFile();
+        upload.setStatus(MultipartUploadService.STATUS_COMPLETED);
+        upload.setMinioUploadId(null);
+        upload.setProcessingStatus(DocumentProcessingStatus.READY);
+        when(repository.findOwnedByIdForUpdate(7L, "u1")).thenReturn(Optional.of(upload));
+
+        service.complete(7L, "u1");
+
+        verify(outboxEventService, never()).recordDocumentProcessingRequested(any());
+    }
+
+    @Test
     void deletingIncompleteUploadAbortsMinioAndRemovesDatabaseRecord() throws Exception {
         FileUpload upload = uploadingFile();
         when(repository.findOwnedByIdForUpdate(7L, "u1")).thenReturn(Optional.of(upload));
@@ -121,5 +183,13 @@ class MultipartUploadServiceTest {
         upload.setUserId("u1");
         upload.setProcessingStatus(DocumentProcessingStatus.UPLOADED);
         return upload;
+    }
+
+    private Part part(int number, long size) {
+        Part part = Mockito.mock(Part.class);
+        when(part.partNumber()).thenReturn(number);
+        when(part.partSize()).thenReturn(size);
+        when(part.etag()).thenReturn("etag-" + number);
+        return part;
     }
 }

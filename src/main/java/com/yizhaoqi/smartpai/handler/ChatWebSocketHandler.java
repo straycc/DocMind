@@ -57,7 +57,9 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                     if ("stop".equals(messageType) && INTERNAL_CMD_TOKEN.equals(internalToken)) {
                         // 处理停止指令
                         logger.info("收到有效的停止按钮指令，用户ID: {}，会话ID: {}", userId, session.getId());
-                        chatHandler.stopResponse(userId, session);
+                        Object requestedTurnId = jsonMessage.get("turnId");
+                        chatHandler.stopResponse(userId, session,
+                                requestedTurnId == null ? null : requestedTurnId.toString());
                         return;
                     }
                     
@@ -82,6 +84,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         String userId = extractUserId(session);
+        chatHandler.connectionClosed(session);
         sessions.remove(userId);
         logger.info("WebSocket连接已关闭，用户ID: {}，会话ID: {}，状态: {}", 
                     userId, session.getId(), status);
@@ -119,4 +122,4 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     public static String getInternalCmdToken() {
         return INTERNAL_CMD_TOKEN;
     }
-} 
+}

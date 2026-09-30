@@ -214,6 +214,9 @@ declare namespace Api {
 
     interface Output {
       chunk: string;
+      type?: 'start' | 'chunk' | 'completion' | 'stop' | 'error';
+      conversationId?: string;
+      turnId?: string;
     }
 
     interface Source {
@@ -246,6 +249,8 @@ declare namespace Api {
       timestamp?: string;
       sources?: Source[];
       citationValidation?: CitationValidation;
+      turnId?: string;
+      queryRewritten?: boolean;
     }
 
     interface Token {

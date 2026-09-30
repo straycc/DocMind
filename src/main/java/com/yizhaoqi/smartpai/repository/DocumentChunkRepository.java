@@ -12,6 +12,8 @@ import java.util.List;
 public interface DocumentChunkRepository extends JpaRepository<DocumentChunk, Long> {
     List<DocumentChunk> findByFileUploadIdOrderByOrdinalAsc(Long fileUploadId);
 
+    boolean existsByFileUploadId(Long fileUploadId);
+
     List<DocumentChunk> findBySectionIdAndOrdinalBetweenOrderByOrdinalAsc(Long sectionId, Integer start, Integer end);
 
     @Transactional
