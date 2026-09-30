@@ -40,7 +40,7 @@ public class FileProcessingTask {
         this.filePath = filePath;
         this.fileName = fileName;
         this.userId = null;
-        this.orgTag = "DEFAULT";
+        this.orgTag = OrganizationTagDefaults.TAG_ID;
         this.isPublic = false;
     }
 

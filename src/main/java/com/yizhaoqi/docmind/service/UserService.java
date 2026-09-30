@@ -37,9 +37,9 @@ public class UserService {
 
     private static final Logger logger = LoggerFactory.getLogger(UserService.class);
     
-    private static final String DEFAULT_ORG_TAG = "DEFAULT";
-    private static final String DEFAULT_ORG_NAME = "默认组织";
-    private static final String DEFAULT_ORG_DESCRIPTION = "系统默认组织标签，自动分配给所有新用户";
+    private static final String DEFAULT_ORG_TAG = com.yizhaoqi.docmind.model.OrganizationTagDefaults.TAG_ID;
+    private static final String DEFAULT_ORG_NAME = com.yizhaoqi.docmind.model.OrganizationTagDefaults.NAME;
+    private static final String DEFAULT_ORG_DESCRIPTION = com.yizhaoqi.docmind.model.OrganizationTagDefaults.DESCRIPTION;
     private static final String PRIVATE_TAG_PREFIX = "PRIVATE_";
     private static final String PRIVATE_ORG_NAME_SUFFIX = "的私人空间";
     private static final String PRIVATE_ORG_DESCRIPTION = "用户的私人组织标签，仅用户本人可访问";
@@ -678,12 +678,12 @@ public class UserService {
      * 
      * @param keyword 搜索关键词
      * @param orgTag 组织标签过滤
-     * @param status 用户状态过滤
+     * @param role 用户角色过滤
      * @param page 页码
      * @param size 每页大小
      * @return 用户列表数据
      */
-    public Map<String, Object> getUserList(String keyword, String orgTag, Integer status, int page, int size) {
+    public Map<String, Object> getUserList(String keyword, String orgTag, User.Role role, int page, int size) {
         // 页码从1开始，需要转换为从0开始
         int pageIndex = page > 0 ? page - 1 : 0;
         // 创建分页请求
@@ -692,7 +692,7 @@ public class UserService {
         // 获取用户列表
         Page<User> userPage;
         
-        if (orgTag != null && !orgTag.isEmpty()) {
+        if ((orgTag != null && !orgTag.isEmpty()) || (keyword != null && !keyword.isEmpty()) || role != null) {
             // 按组织标签过滤用户
             // 由于我们存储组织标签为逗号分隔的字符串，需要自定义实现
             // 这里简化处理，获取所有用户后手动过滤
@@ -700,13 +700,14 @@ public class UserService {
             List<User> filteredUsers = allUsers.stream()
                     .filter(user -> {
                         // 过滤组织标签
-                        if (user.getOrgTags() != null && !user.getOrgTags().isEmpty()) {
+                        if (orgTag != null && !orgTag.isEmpty()) {
+                            if (user.getOrgTags() == null || user.getOrgTags().isEmpty()) {
+                                return false;
+                            }
                             Set<String> userTags = new HashSet<>(Arrays.asList(user.getOrgTags().split(",")));
                             if (!userTags.contains(orgTag)) {
                                 return false;
                             }
-                        } else {
-                            return false;
                         }
                         
                         // 过滤关键词
@@ -717,9 +718,9 @@ public class UserService {
                             }
                         }
                         
-                        // 过滤状态
-                        if (status != null) {
-                            return user.getRole() == (status == 1 ? User.Role.USER : User.Role.ADMIN);
+                        // 过滤角色
+                        if (role != null) {
+                            return user.getRole() == role;
                         }
                         
                         return true;
@@ -733,31 +734,8 @@ public class UserService {
             List<User> pageContent = start < end ? filteredUsers.subList(start, end) : Collections.emptyList();
             userPage = new PageImpl<>(pageContent, pageable, filteredUsers.size());
         } else {
-            // 使用 JPA 分页查询（不含组织标签过滤）
-            // 这里假设UserRepository有findByKeywordAndStatus方法，实际中可能需要自定义实现
+            // 无筛选条件时直接分页查询。
             userPage = userRepository.findAll(pageable);
-            
-            // 手动过滤（简化实现）
-            List<User> filteredUsers = userPage.getContent().stream()
-                    .filter(user -> {
-                        // 过滤关键词
-                        if (keyword != null && !keyword.isEmpty()) {
-                            boolean matchesKeyword = user.getUsername().contains(keyword);
-                            if (!matchesKeyword) {
-                                return false;
-                            }
-                        }
-                        
-                        // 过滤状态
-                        if (status != null) {
-                            return user.getRole() == (status == 1 ? User.Role.USER : User.Role.ADMIN);
-                        }
-                        
-                        return true;
-                    })
-                    .collect(Collectors.toList());
-                    
-            userPage = new PageImpl<>(filteredUsers, pageable, filteredUsers.size());
         }
         
         // 转换为前端需要的格式
@@ -785,7 +763,7 @@ public class UserService {
                     
                     userMap.put("orgTags", orgTagDetails);
                     userMap.put("primaryOrg", user.getPrimaryOrg());
-                    userMap.put("status", user.getRole() == User.Role.USER ? 1 : 0);
+                    userMap.put("role", user.getRole().name());
                     userMap.put("createdAt", user.getCreatedAt());
                     
                     return userMap;

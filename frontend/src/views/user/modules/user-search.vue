@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { enableStatusOptions } from '@/constants/common';
+import { userRoleOptions } from '@/constants/common';
 
 defineOptions({
   name: 'UserSearch'
@@ -27,14 +27,14 @@ async function search() {
       <NFormItem label="关键词" path="keyword">
         <NInput v-model:value="model.keyword" placeholder="请输入关键词" clearable />
       </NFormItem>
-      <NFormItem label="组织标签" path="userGender">
+      <NFormItem label="组织标签" path="orgTag">
         <OrgTagCascader v-model:value="model.orgTag" clearable class="w-200px!" />
       </NFormItem>
-      <NFormItem label="启用状态" path="status">
+      <NFormItem label="用户角色" path="role">
         <NSelect
-          v-model:value="model.status"
-          placeholder="请选择启用状态"
-          :options="enableStatusOptions"
+          v-model:value="model.role"
+          placeholder="请选择用户角色"
+          :options="userRoleOptions"
           clearable
           class="w-200px!"
         />

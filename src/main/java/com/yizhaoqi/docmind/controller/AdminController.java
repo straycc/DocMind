@@ -386,7 +386,7 @@ public class AdminController {
             @RequestHeader("Authorization") String token,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String orgTag,
-            @RequestParam(required = false) Integer status,
+            @RequestParam(required = false) User.Role role,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
         
@@ -394,7 +394,7 @@ public class AdminController {
         validateAdmin(adminUsername);
         
         try {
-            Map<String, Object> usersData = userService.getUserList(keyword, orgTag, status, page, size);
+            Map<String, Object> usersData = userService.getUserList(keyword, orgTag, role, page, size);
             return ResponseEntity.ok(Map.of(
                 "code", 200, 
                 "message", "获取用户列表成功", 

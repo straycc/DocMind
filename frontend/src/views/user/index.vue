@@ -14,7 +14,7 @@ const { columns, columnChecks, data, getData, loading, mobilePagination, searchP
   apiParams: {
     keyword: null,
     orgTag: null,
-    status: null
+    role: null
   },
   columns: () => [
     {
@@ -46,10 +46,12 @@ const { columns, columnChecks, data, getData, loading, mobilePagination, searchP
       width: 200
     },
     {
-      key: 'status',
-      title: '是否启用',
+      key: 'role',
+      title: '用户角色',
       width: 100,
-      render: row => <NTag type={row.status ? 'success' : 'warning'}>{row.status ? '已启用' : '已禁用'}</NTag>
+      render: row => (
+        <NTag type={row.role === 'ADMIN' ? 'primary' : 'default'}>{row.role === 'ADMIN' ? '管理员' : '普通用户'}</NTag>
+      )
     },
     {
       key: 'createTime',

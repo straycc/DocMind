@@ -84,11 +84,12 @@ declare namespace Api {
   }
 
   namespace User {
+    type Role = 'ADMIN' | 'USER';
     type SearchParams = CommonType.RecordNullable<
       Common.CommonSearchParams & {
         keyword: string;
         orgTag: string;
-        status: number;
+        role: Role;
       }
     >;
 
@@ -96,7 +97,7 @@ declare namespace Api {
       userId: string;
       username: string;
       email: string;
-      status: number;
+      role: Role;
       orgTags: Pick<OrgTag.Item, 'tagId' | 'name'>[];
       primaryOrg: string;
       createTime: string;
