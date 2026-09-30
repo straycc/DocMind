@@ -51,18 +51,6 @@ export const generatedRoutes: GeneratedRoute[] = [
     }
   },
   {
-    name: 'chat-history',
-    path: '/chat-history',
-    component: 'layout.base$view.chat-history',
-    meta: {
-      title: 'chat-history',
-      i18nKey: 'route.chat-history',
-      roles: ['ADMIN'],
-      icon: 'solar:hashtag-chat-broken',
-      order: 2
-    }
-  },
-  {
     name: 'iframe-page',
     path: '/iframe-page/:url',
     component: 'layout.base$view.iframe-page',

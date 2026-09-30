@@ -1,10 +1,5 @@
 <script setup lang="ts">
-import { useFullscreen } from '@vueuse/core';
 import { useAppStore } from '@/store/modules/app';
-import { useThemeStore } from '@/store/modules/theme';
-import GlobalSearch from '../global-search/index.vue';
-import ThemeButton from './components/theme-button.vue';
-import UserAvatar from './components/user-avatar.vue';
 
 defineOptions({
   name: 'GlobalHeader'
@@ -22,10 +17,6 @@ interface Props {
 defineProps<Props>();
 
 const appStore = useAppStore();
-const themeStore = useThemeStore();
-const { isFullscreen, toggle } = useFullscreen();
-
-const isDev = import.meta.env.DEV;
 </script>
 
 <template>
@@ -43,24 +34,11 @@ const isDev = import.meta.env.DEV;
       <GlobalBreadcrumb v-if="!appStore.isMobile" class="ml-12px" />
     </div>
 -->
-    <div class="h-full flex-y-center justify-end rd-full bg-container px-8 shadow-2xl">
-      <GlobalSearch />
-      <FullScreen v-if="!appStore.isMobile" :full="isFullscreen" @click="toggle" />
-      <LangSwitch
-        v-if="themeStore.header.multilingual.visible"
-        :lang="appStore.locale"
-        :lang-options="appStore.localeOptions"
-        @change-lang="appStore.changeLocale"
-      />
-      <ThemeSchemaSwitch
-        :theme-schema="themeStore.themeScheme"
-        :is-dark="themeStore.darkMode"
-        @switch="themeStore.toggleThemeScheme"
-      />
-      <ThemeButton v-if="isDev" />
-      <UserAvatar />
-    </div>
   </DarkModeContainer>
 </template>
 
-<style scoped></style>
+<style scoped>
+#header-extra:empty {
+  display: none;
+}
+</style>

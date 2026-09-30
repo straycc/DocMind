@@ -20,7 +20,7 @@ const menuWrapperClass = computed(() => (showLogo.value ? 'flex-1-hidden' : 'h-f
 </script>
 
 <template>
-  <DarkModeContainer class="size-full flex-col-stretch shadow-sider" :inverted="darkMenu">
+  <DarkModeContainer class="global-sider size-full flex-col-stretch shadow-sider" :inverted="darkMenu">
     <GlobalLogo
       v-if="showLogo"
       :show-title="!appStore.siderCollapse"
@@ -30,4 +30,12 @@ const menuWrapperClass = computed(() => (showLogo.value ? 'flex-1-hidden' : 'h-f
   </DarkModeContainer>
 </template>
 
-<style scoped></style>
+<style scoped>
+.global-sider :deep(.simplebar-content-wrapper:focus) {
+  outline: none;
+}
+
+.global-sider :deep(.simplebar-content-wrapper:focus-visible) {
+  box-shadow: inset 0 0 0 2px rgb(var(--primary-color) / 15%);
+}
+</style>

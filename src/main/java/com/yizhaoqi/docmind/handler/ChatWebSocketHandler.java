@@ -62,6 +62,17 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                                 requestedTurnId == null ? null : requestedTurnId.toString());
                         return;
                     }
+
+                    if ("message".equals(messageType)) {
+                        Object content = jsonMessage.get("message");
+                        Object conversationId = jsonMessage.get("conversationId");
+                        if (content == null || content.toString().isBlank()) {
+                            throw new IllegalArgumentException("消息内容不能为空");
+                        }
+                        chatHandler.processMessage(userId, content.toString(),
+                                conversationId == null ? null : conversationId.toString(), session);
+                        return;
+                    }
                     
                     // 其他JSON消息当作普通消息处理
                     logger.debug("收到JSON格式的聊天消息，当作普通消息处理");

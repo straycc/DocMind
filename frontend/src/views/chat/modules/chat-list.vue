@@ -10,7 +10,6 @@ defineOptions({
 const chatStore = useChatStore();
 const { list } = storeToRefs(chatStore);
 
-const loading = ref(false);
 const scrollbarRef = ref<InstanceType<typeof NScrollbar>>();
 
 watch(() => [...list.value], scrollToBottom);
@@ -24,51 +23,27 @@ function scrollToBottom() {
   }, 100);
 }
 
-const range = ref<[number, number]>([dayjs().subtract(7, 'day').valueOf(), dayjs().add(1, 'day').valueOf()]);
-
-const params = computed(() => {
-  return {
-    start_date: dayjs(range.value[0]).format('YYYY-MM-DD'),
-    end_date: dayjs(range.value[1]).format('YYYY-MM-DD')
-  };
-});
-
-watchEffect(() => {
-  getList();
-});
-
-async function getList() {
-  loading.value = true;
-  const { error, data } = await request<Api.Chat.Message[]>({
-    url: 'users/conversation',
-    params: params.value
-  });
-  if (!error) {
-    list.value = data;
-  }
-  loading.value = false;
-}
-
 onMounted(() => {
   chatStore.scrollToBottom = scrollToBottom;
 });
 </script>
 
 <template>
-  <Suspense>
+  <div v-if="!list.length" class="min-h-0 flex flex-1 items-center justify-center px-5 text-center">
+    <NSpin :show="chatStore.conversationLoading">
+      <div class="py-8">
+        <h2 class="m-0 text-6 font-semibold">你好，我是 DocMind</h2>
+        <p class="mt-3 text-3.5 text-gray-500">从知识库中检索可靠信息，并为回答标注来源</p>
+      </div>
+    </NSpin>
+  </div>
+  <Suspense v-else>
     <NScrollbar ref="scrollbarRef" class="h-0 flex-auto">
-      <Teleport defer to="#header-extra">
-        <div class="px-10">
-          <NForm :model="params" label-placement="left" :show-feedback="false" inline>
-            <NFormItem label="时间">
-              <NDatePicker v-model:value="range" type="daterange" />
-            </NFormItem>
-          </NForm>
-        </div>
-      </Teleport>
-      <NSpin :show="loading">
+      <NSpin :show="chatStore.conversationLoading" class="min-h-full">
         <VueMarkdownItProvider>
-          <ChatMessage v-for="(item, index) in list" :key="index" :msg="item" />
+          <div v-if="list.length" class="mx-auto max-w-1000px w-full px-5 py-6">
+            <ChatMessage v-for="(item, index) in list" :key="`${item.timestamp || 'message'}-${index}`" :msg="item" />
+          </div>
         </VueMarkdownItProvider>
       </NSpin>
     </NScrollbar>

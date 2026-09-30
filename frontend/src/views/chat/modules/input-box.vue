@@ -38,6 +38,7 @@ watch(wsData, val => {
     assistant.citationValidation = data.citationValidation;
     assistant.queryRewritten = Boolean(data.queryRewritten);
     activeTurnId.value = '';
+    chatStore.loadConversations(false);
   }
   if (data.type === 'stop') {
     assistant.status = 'finished';
@@ -67,8 +68,15 @@ const handleSend = async () => {
     return;
   }
 
+  const content = input.value.message;
+  if (!content) return;
+  if (!conversationId.value) {
+    const createdId = await chatStore.createConversation();
+    if (!createdId) return;
+  }
+
   list.value.push({
-    content: input.value.message,
+    content,
     role: 'user'
   });
   list.value.push({
@@ -77,7 +85,7 @@ const handleSend = async () => {
     status: 'pending'
   });
   activeTurnId.value = '';
-  chatStore.wsSend(input.value.message);
+  chatStore.wsSend(JSON.stringify({ type: 'message', conversationId: conversationId.value, message: content }));
   input.value.message = '';
 };
 
@@ -113,17 +121,17 @@ const handShortcut = (e: KeyboardEvent) => {
 </script>
 
 <template>
-  <div class="relative w-full b-1 b-#1c1c1c20 bg-#fff p-4 card-wrapper dark:bg-#1c1c1c">
+  <div class="relative w-full border border-#e5e7eb rounded-4 bg-white p-4 shadow-[0_10px_35px_rgba(35,65,100,0.06)]">
     <textarea
       ref="inputRef"
       v-model.trim="input.message"
       placeholder="给 DocMind 发送消息"
-      class="min-h-10 w-full cursor-text resize-none b-none bg-transparent color-#333 caret-[rgb(var(--primary-color))] outline-none dark:color-#f1f1f1"
+      class="min-h-12 w-full cursor-text resize-none b-none bg-transparent color-#202124 caret-[rgb(var(--primary-color))] outline-none"
       @keydown="handShortcut"
     />
     <div class="flex items-center justify-between pt-2">
       <div class="flex items-center text-18px color-gray-500">
-        <NText class="text-14px">连接状态：</NText>
+        <NText depth="3" class="text-13px">服务状态</NText>
         <icon-eos-icons:loading v-if="wsStatus === 'CONNECTING'" class="color-yellow" />
         <icon-fluent:plug-connected-checkmark-20-filled v-else-if="wsStatus === 'OPEN'" class="color-green" />
         <icon-tabler:plug-connected-x v-else class="color-red" />

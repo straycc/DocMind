@@ -1,10 +1,10 @@
 /** Default theme settings */
 export const themeSettings: App.Theme.ThemeSetting = {
-  themeScheme: 'auto',
+  themeScheme: 'light',
   grayscale: false,
   colourWeakness: false,
-  recommendColor: true,
-  themeColor: '#646cff',
+  recommendColor: false,
+  themeColor: '#3674be',
   otherColor: { info: '#2080f0', success: '#52c41a', warning: '#faad14', error: '#f5222d' },
   isInfoFollowPrimary: true,
   resetCacheStrategy: 'close',
@@ -46,4 +46,12 @@ export const themeSettings: App.Theme.ThemeSetting = {
  *
  * If publish new version, use `overrideThemeSettings` to override certain theme settings
  */
-export const overrideThemeSettings: Partial<App.Theme.ThemeSetting> = {};
+export const overrideThemeSettings: Partial<App.Theme.ThemeSetting> = {
+  themeColor: '#3674be',
+  recommendColor: false,
+  themeScheme: 'light',
+  layout: { mode: 'vertical', scrollMode: 'content', reverseHorizontalMix: false },
+  tab: { visible: false, cache: true, height: 44, mode: 'chrome' },
+  footer: { visible: false, fixed: false, height: 48, right: true },
+  watermark: { visible: false, text: 'DocMind' }
+};

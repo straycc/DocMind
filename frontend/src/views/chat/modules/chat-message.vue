@@ -80,7 +80,6 @@ function handleContentClick(event: MouseEvent) {
 // 处理来源文件点击事件
 async function handleSourceFileClick(fileName: string) {
   const decodedFileName = decodeURIComponent(fileName);
-  console.log('点击了来源文件:', decodedFileName);
 
   try {
     window.$message?.loading(`正在获取文件下载链接: ${decodedFileName}`, {
@@ -112,84 +111,170 @@ async function handleSourceFileClick(fileName: string) {
     } else {
       window.$message?.error('未能获取到下载链接');
     }
-  } catch (err) {
+  } catch {
     window.$message?.destroyAll();
-    console.error('文件下载失败:', err);
     window.$message?.error(`文件下载失败: ${decodedFileName}`);
   }
 }
 </script>
 
 <template>
-  <div class="mb-8 flex-col gap-2">
-    <div v-if="msg.role === 'user'" class="flex items-center gap-4">
-      <NAvatar class="bg-success">
-        <SvgIcon icon="ph:user-circle" class="text-icon-large color-white" />
-      </NAvatar>
-      <div class="flex-col gap-1">
-        <NText class="text-4 font-bold">{{ authStore.userInfo.username }}</NText>
-        <NText class="text-3 color-gray-500">{{ formatDate(msg.timestamp) }}</NText>
+  <div class="message-row" :class="msg.role === 'user' ? 'message-row--user' : 'message-row--assistant'">
+    <div class="message-column">
+      <div class="message-meta" :class="{ 'justify-end': msg.role === 'user' }">
+        <NText class="text-3.5 font-semibold">
+          {{ msg.role === 'user' ? authStore.userInfo.username : 'DocMind' }}
+        </NText>
+        <NText depth="3" class="text-3">{{ formatDate(msg.timestamp) }}</NText>
+      </div>
+
+      <div class="message-bubble" :class="`message-bubble--${msg.role}`">
+        <div v-if="msg.status === 'pending'" class="py-1">
+          <icon-eos-icons:three-dots-loading class="text-7 text-primary" />
+        </div>
+        <NText v-else-if="msg.status === 'error'" type="error">服务器繁忙，请稍后再试</NText>
+        <div v-else-if="msg.role === 'assistant'" class="assistant-content" @click="handleContentClick">
+          <VueMarkdownIt :content="content" />
+          <NText v-if="!citationValidation.allCitationIdsValid" type="error" class="mt-2 block text-3">
+            回答中存在未匹配的引用编号：{{ citationValidation.invalidCitationIds.join('、') }}
+          </NText>
+          <div v-if="citedSources.length" class="mt-4 border-t border-#eef0f5 pt-3">
+            <NText depth="3" class="mb-2 block text-3">引用来源</NText>
+            <div class="flex flex-wrap items-center gap-2">
+              <NTag
+                v-for="source in citedSources"
+                :key="source.sourceId"
+                size="small"
+                type="info"
+                :bordered="false"
+                :title="source.excerpt"
+                class="cursor-pointer"
+                @click.stop="source.fileName && handleSourceFileClick(source.fileName)"
+              >
+                【来源#{{ source.sourceId }}】{{ source.sourceLabel }}
+              </NTag>
+            </div>
+          </div>
+        </div>
+        <NText v-else class="whitespace-pre-wrap text-4 leading-7">{{ content }}</NText>
+      </div>
+
+      <div class="message-actions" :class="{ 'justify-end': msg.role === 'user' }">
+        <NButton quaternary size="tiny" title="复制" @click="handleCopy(msg.content)">
+          <template #icon><icon-mynaui:copy /></template>
+        </NButton>
       </div>
     </div>
-    <div v-else class="flex items-center gap-4">
-      <NAvatar class="bg-primary">
-        <SystemLogo class="text-6 text-white" />
-      </NAvatar>
-      <div class="flex-col gap-1">
-        <NText class="text-4 font-bold">DocMind</NText>
-        <NText class="text-3 color-gray-500">{{ formatDate(msg.timestamp) }}</NText>
-      </div>
-    </div>
-    <NText v-if="msg.status === 'pending'">
-      <icon-eos-icons:three-dots-loading class="ml-12 mt-2 text-8" />
-    </NText>
-    <NText v-else-if="msg.status === 'error'" class="ml-12 mt-2 italic">服务器繁忙，请稍后再试</NText>
-    <div v-else-if="msg.role === 'assistant'" class="mt-2 pl-12" @click="handleContentClick">
-      <VueMarkdownIt :content="content" />
-      <NText v-if="!citationValidation.allCitationIdsValid" type="error" class="mt-2 block text-3">
-        回答中存在未匹配的引用编号：{{ citationValidation.invalidCitationIds.join('、') }}
-      </NText>
-      <div v-if="citedSources.length" class="mt-3 flex flex-wrap items-center gap-2 text-3">
-        <NText depth="3">引用来源：</NText>
-        <NTag
-          v-for="source in citedSources"
-          :key="source.sourceId"
-          size="small"
-          type="info"
-          :title="source.excerpt"
-          class="cursor-pointer"
-          @click.stop="source.fileName && handleSourceFileClick(source.fileName)"
-        >
-          【来源#{{ source.sourceId }}】{{ source.sourceLabel }}
-        </NTag>
-      </div>
-    </div>
-    <NText v-else-if="msg.role === 'user'" class="ml-12 mt-2 text-4">{{ content }}</NText>
-    <NDivider class="ml-12 w-[calc(100%-3rem)] mb-0! mt-2!" />
-    <div class="ml-12 flex gap-4">
-      <NButton quaternary @click="handleCopy(msg.content)">
-        <template #icon>
-          <icon-mynaui:copy />
-        </template>
-      </NButton>
-    </div>
+    <NAvatar v-if="msg.role === 'user'" round class="message-avatar message-avatar--user">
+      <SvgIcon icon="ph:user" class="text-5 text-white" />
+    </NAvatar>
   </div>
 </template>
 
 <style scoped lang="scss">
+.message-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.message-row--user {
+  justify-content: flex-end;
+}
+
+.message-column {
+  min-width: 0;
+  width: 100%;
+}
+
+.message-row--user .message-column {
+  width: auto;
+  max-width: 82%;
+}
+
+.message-meta,
+.message-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.message-meta {
+  margin-bottom: 7px;
+}
+
+.message-actions {
+  min-height: 28px;
+  margin-top: 3px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.message-row:hover .message-actions {
+  opacity: 1;
+}
+
+.message-avatar {
+  flex: 0 0 auto;
+  box-shadow: 0 4px 12px rgb(35 65 100 / 8%);
+}
+
+.message-avatar--user {
+  background: #334155;
+}
+
+.message-bubble {
+  border-radius: 16px;
+  line-height: 1.75;
+}
+
+.message-bubble--assistant {
+  border: 1px solid #e9eaf0;
+  border-top-left-radius: 5px;
+  background: #fff;
+  padding: 16px 18px;
+  box-shadow: 0 6px 24px rgb(35 65 100 / 4%);
+}
+
+.message-bubble--user {
+  border-top-right-radius: 5px;
+  background: rgb(var(--primary-color) / 10%);
+  padding: 12px 16px;
+  color: #253c58;
+}
+
+.message-bubble--user :deep(.n-text) {
+  color: #253c58;
+}
+
+.assistant-content :deep(p:first-child) {
+  margin-top: 0;
+}
+
+.assistant-content :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
 :deep(.source-file-link) {
-  color: #1890ff;
+  color: rgb(var(--primary-color));
   cursor: pointer;
   text-decoration: underline;
   transition: color 0.2s;
 
   &:hover {
-    color: #40a9ff;
+    color: rgb(var(--primary-600-color));
     text-decoration: none;
   }
 
   &:active {
-    color: #096dd9;
+    color: rgb(var(--primary-700-color));
+  }
+}
+
+@media (max-width: 640px) {
+  .message-row--user .message-column {
+    max-width: calc(100% - 48px);
   }
 }
 </style>

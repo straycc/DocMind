@@ -1,5 +1,16 @@
 <script setup lang="ts">
 const { userInfo } = storeToRefs(useAuthStore());
+const authStore = useAuthStore();
+
+function logout() {
+  window.$dialog?.info({
+    title: '提示',
+    content: '确定退出登录吗？',
+    positiveText: '确定',
+    negativeText: '取消',
+    onPositiveClick: async () => authStore.logout()
+  });
+}
 
 const tags = ref<Api.OrgTag.Mine>({
   orgTags: [],
@@ -51,11 +62,17 @@ const setPrimaryOrg = async () => {
     <div class="flex-cc">
       <NCard class="min-h-400px min-w-600px w-50vw card-wrapper" :segmented="{ content: true, footer: 'soft' }">
         <template #header>
-          <div class="flex items-center gap-4">
-            <NAvatar size="large">
-              <icon-solar:user-circle-linear class="text-icon-large" />
-            </NAvatar>
-            <div>{{ userInfo.username }}</div>
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-4">
+              <NAvatar size="large">
+                <icon-solar:user-circle-linear class="text-icon-large" />
+              </NAvatar>
+              <div>{{ userInfo.username }}</div>
+            </div>
+            <NButton secondary type="error" @click="logout">
+              <template #icon><icon-ph:sign-out /></template>
+              退出登录
+            </NButton>
           </div>
         </template>
         <NScrollbar class="max-h-60vh">

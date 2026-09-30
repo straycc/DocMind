@@ -163,7 +163,6 @@ const local: App.I18n.Schema = {
     500: 'Server Error',
     'iframe-page': 'Iframe',
     chat: 'Chat Assistant',
-    'chat-history': 'Chat History',
     'knowledge-base': 'Knowledge Base',
     'org-tag': 'Organization Tag',
     user: 'User Management',

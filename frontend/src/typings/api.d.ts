@@ -238,9 +238,12 @@ declare namespace Api {
       allCitationIdsValid: boolean;
     }
 
-    interface Conversation {
-      conversationId: string;
-    }
+      interface Conversation {
+        conversationId: string;
+        title: string;
+        createdAt: string;
+        updatedAt: string;
+      }
 
     interface Message {
       role: 'user' | 'assistant';

@@ -6,13 +6,11 @@ import com.yizhaoqi.docmind.entity.SearchResult;
 import com.yizhaoqi.docmind.model.ConversationMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import reactor.core.Disposable;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -25,33 +23,42 @@ public class ChatHandler {
 
     private static final Logger logger = LoggerFactory.getLogger(ChatHandler.class);
 
-    private final RedisTemplate<String, String> redisTemplate;
     private final HybridSearchService searchService;
     private final DeepSeekClient deepSeekClient;
     private final ConversationHistoryService historyService;
     private final ConversationQueryRewriter queryRewriter;
+    private final ConversationSessionService sessionService;
     private final ObjectMapper objectMapper;
 
     /** 同一个 WebSocket 连接最多保留一个活动回答，键为 sessionId。 */
     private final Map<String, ChatTurn> activeTurns = new ConcurrentHashMap<>();
 
-    public ChatHandler(RedisTemplate<String, String> redisTemplate,
-                       HybridSearchService searchService,
+    public ChatHandler(HybridSearchService searchService,
                        DeepSeekClient deepSeekClient,
                        ConversationHistoryService historyService,
                        ConversationQueryRewriter queryRewriter,
+                       ConversationSessionService sessionService,
                        ObjectMapper objectMapper) {
-        this.redisTemplate = redisTemplate;
         this.searchService = searchService;
         this.deepSeekClient = deepSeekClient;
         this.historyService = historyService;
         this.queryRewriter = queryRewriter;
+        this.sessionService = sessionService;
         this.objectMapper = objectMapper;
     }
 
     public void processMessage(String userId, String userMessage, WebSocketSession session) {
-        String conversationId = getOrCreateConversationId(userId);
-        ChatTurn turn = new ChatTurn(session.getId(), conversationId, UUID.randomUUID().toString(), userMessage);
+        processMessage(userId, userMessage, null, session);
+    }
+
+    public void processMessage(String userId, String userMessage, String requestedConversationId,
+                               WebSocketSession session) {
+        String conversationId = requestedConversationId == null || requestedConversationId.isBlank()
+                ? sessionService.create(userId).conversationId()
+                : sessionService.requireOwned(userId, requestedConversationId);
+        sessionService.touchWithMessage(userId, conversationId, userMessage);
+        ChatTurn turn = new ChatTurn(session.getId(), userId, conversationId,
+                UUID.randomUUID().toString(), userMessage);
         ChatTurn previous = activeTurns.put(session.getId(), turn);
         if (previous != null) {
             cancelTurn(previous, session, "superseded", false);
@@ -132,6 +139,7 @@ public class ChatHandler {
 
         historyService.appendTurn(turn.conversationId, turn.userMessage,
                 completeResponse, turn.answerContext.sources());
+        sessionService.touchWithMessage(turn.userId, turn.conversationId, turn.userMessage);
         sendEvent(session, Map.of(
                 "type", "completion",
                 "status", "finished",
@@ -216,17 +224,6 @@ public class ChatHandler {
         return activeTurns.get(turn.sessionId) == turn;
     }
 
-    private String getOrCreateConversationId(String userId) {
-        String key = "user:" + userId + ":current_conversation";
-        String conversationId = redisTemplate.opsForValue().get(key);
-        if (conversationId == null) {
-            conversationId = UUID.randomUUID().toString();
-            redisTemplate.opsForValue().set(key, conversationId, Duration.ofDays(7));
-            logger.info("为用户 {} 创建新的会话ID: {}", userId, conversationId);
-        }
-        return conversationId;
-    }
-
     private void sendEvent(WebSocketSession session, Map<String, ?> event) {
         if (!session.isOpen()) {
             return;
@@ -245,6 +242,7 @@ public class ChatHandler {
 
     private static final class ChatTurn {
         private final String sessionId;
+        private final String userId;
         private final String conversationId;
         private final String turnId;
         private final String userMessage;
@@ -256,8 +254,9 @@ public class ChatHandler {
         private volatile ConversationQueryRewriter.RewriteResult rewriteResult =
                 new ConversationQueryRewriter.RewriteResult("", "", false, false, 0);
 
-        private ChatTurn(String sessionId, String conversationId, String turnId, String userMessage) {
+        private ChatTurn(String sessionId, String userId, String conversationId, String turnId, String userMessage) {
             this.sessionId = sessionId;
+            this.userId = userId;
             this.conversationId = conversationId;
             this.turnId = turnId;
             this.userMessage = userMessage;

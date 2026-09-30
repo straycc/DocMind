@@ -96,9 +96,7 @@ function handleOrgTag(row: Api.User.Item) {
 
 <template>
   <div class="min-h-500px flex-col-stretch gap-16px overflow-hidden lt-sm:overflow-auto">
-    <Teleport defer to="#header-extra">
-      <UserSearch v-model:model="searchParams" @reset="resetSearchParams" @search="getData" />
-    </Teleport>
+    <UserSearch v-model:model="searchParams" @reset="resetSearchParams" @search="getData" />
     <NCard title="用户列表" :bordered="false" size="small" class="sm:flex-1-hidden card-wrapper">
       <template #header-extra>
         <TableHeaderOperation v-model:columns="columnChecks" :addable="false" :loading="loading" @refresh="getData" />
