@@ -3,6 +3,8 @@ server:
   port: ${SERVER_PORT:8081}
 
 spring:
+  config:
+    import: optional:file:./.env[.properties]
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
@@ -19,6 +21,7 @@ spring:
     redis:
       host: ${REDIS_HOST}
       port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
   servlet:
     multipart:
       enabled: true
@@ -43,7 +46,7 @@ spring:
     listener:
       concurrency: ${KAFKA_LISTENER_CONCURRENCY:3}
     topic:
-      file-processing: ${KAFKA_FILE_PROCESSING_TOPIC:file-processing-topic}
+      file-processing: ${KAFKA_FILE_PROCESSING_TOPIC:file-processing}
       dlt: ${KAFKA_DLT_TOPIC:file-processing-dlt}
   elasticsearch:
     uris: ${ELASTICSEARCH_URIS}
@@ -79,8 +82,8 @@ jwt:
 admin:
   username: ${ADMIN_USERNAME:admin}
   password: ${ADMIN_PASSWORD}
-  primary-org: ${ADMIN_PRIMARY_ORG:default}
-  org-tags: ${ADMIN_ORG_TAGS:default,admin}
+  primary-org: ${ADMIN_PRIMARY_ORG:DEFAULT}
+  org-tags: ${ADMIN_ORG_TAGS:DEFAULT,admin}
 
 file:
   parsing:
@@ -93,6 +96,8 @@ elasticsearch:
   host: ${ELASTICSEARCH_HOST}
   port: ${ELASTICSEARCH_PORT:9200}
   scheme: ${ELASTICSEARCH_SCHEME:http}
+  username: ${ELASTICSEARCH_USERNAME:elastic}
+  password: ${ELASTICSEARCH_PASSWORD}
 
 deepseek:
   api:
